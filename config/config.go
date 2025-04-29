@@ -6,25 +6,37 @@ import (
 )
 
 type Config struct {
-	DbURL      string
-	ServerPort string
+	DbURL            string
+	ServerPort       string
+	JWTSecret        string
+	AdminToken       string
+	XrayConfigPath   string
+	XrayTemplatePath string
 }
 
 func Load() *Config {
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://postgres:password@localhost:5432/vpn?sslmode=disable"
-		log.Println("⚠️  Используется значение БД по умолчанию")
-	}
-
-	port := os.Getenv("SERVER_PORT")
-	if port == "" {
-		port = "8080"
-		log.Println("⚠️  Используется порт сервера по умолчанию")
-	}
+	dbURL := getEnv("DATABASE_URL", "postgres://postgres:password@localhost:5432/vpn?sslmode=disable")
+	serverPort := getEnv("SERVER_PORT", "8080")
+	jwtSecret := getEnv("JWT_SECRET", "your-jwt-secret")
+	adminToken := getEnv("ADMIN_TOKEN", "admin-token")
+	xrayConfigPath := getEnv("XRAY_CONFIG_PATH", "/etc/xray/config.json")
+	xrayTemplatePath := getEnv("XRAY_TEMPLATE_PATH", "/etc/xray/config_template.json")
 
 	return &Config{
-		DbURL:      dbURL,
-		ServerPort: port,
+		DbURL:            dbURL,
+		ServerPort:       serverPort,
+		JWTSecret:        jwtSecret,
+		AdminToken:       adminToken,
+		XrayConfigPath:   xrayConfigPath,
+		XrayTemplatePath: xrayTemplatePath,
 	}
+}
+
+func getEnv(key string, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		log.Printf("Warning: Environment variable %s not set, using default value: %s", key, defaultValue)
+		return defaultValue
+	}
+	return value
 }

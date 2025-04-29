@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"vpn-backend/internal/repository"
@@ -21,13 +22,12 @@ func NewAdminHandler(repo *repository.UserRepository) *AdminHandler {
 func (h *AdminHandler) GetAllUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := h.Repo.GetAllUsers()
 	if err != nil {
-		utils.RespondWithError(w, http.StatusInternalServerError, "Error fetching users")
+		utils.RespondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get all users: %v", err))
 		return
 	}
 	utils.RespondWithJSON(w, http.StatusOK, users)
 }
 
-// Request body: { "ban": true }
 func (h *AdminHandler) BanUser(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	idStr := vars["id"]
@@ -47,8 +47,8 @@ func (h *AdminHandler) BanUser(w http.ResponseWriter, r *http.Request) {
 
 	err = h.Repo.BanUser(id, body.Ban)
 	if err != nil {
-		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to update user ban status")
+		utils.RespondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to ban user: %v", err))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "user ban status updated"})
 }

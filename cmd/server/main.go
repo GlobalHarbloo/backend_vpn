@@ -1,58 +1,129 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"time"
 	"vpn-backend/config"
-	"vpn-backend/internal/db"
 	"vpn-backend/internal/handlers"
+	"vpn-backend/internal/middleware"
+	"vpn-backend/internal/models"
 	"vpn-backend/internal/repository"
 	"vpn-backend/internal/services"
 
+	gorillaHandlers "github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func main() {
-	// Загружаем конфиг
+	// Load configuration
 	cfg := config.Load()
 
-	// Инициализируем базу данных
-	err := db.Init(cfg)
+	// Initialize database connection
+	dbConn, err := gorm.Open(postgres.Open(cfg.DbURL), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info), // Enable detailed logging
+	})
 	if err != nil {
-		log.Fatalf("Ошибка инициализации БД: %v", err)
+		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// Репозиторий
-	userRepo := repository.NewUserRepository()
+	// Auto-migrate database schema
+	err = dbConn.AutoMigrate(&models.User{}, &models.Tariff{})
+	if err != nil {
+		log.Fatalf("Failed to auto-migrate database: %v", err)
+	}
 
-	// Сервисы
-	authService := services.NewAuthService(userRepo)
-	paymentService := services.NewPaymentService(userRepo)
-	xrayService := services.NewXrayService(userRepo)
+	// Initialize repositories
+	userRepo := repository.NewUserRepository(dbConn)
+	tariffRepo := repository.NewTariffRepository(dbConn)
 
-	// Хендлеры
-	userHandler := handlers.NewUserHandler(authService, paymentService)
+	// Initialize services
+	authService := services.NewAuthService(userRepo, cfg.JWTSecret)
+	if authService == nil {
+		log.Fatalf("Failed to initialize AuthService")
+	}
+
+	paymentService := services.NewPaymentService(userRepo, tariffRepo)
+	if paymentService == nil {
+		log.Fatalf("Failed to initialize PaymentService")
+	}
+
+	xrayService := services.NewXrayService(userRepo, cfg.XrayConfigPath, cfg.XrayTemplatePath)
+	if xrayService == nil {
+		log.Fatalf("Failed to initialize XrayService")
+	}
+
+	trafficService := services.NewTrafficService(userRepo, paymentService)
+	if trafficService == nil {
+		log.Fatalf("Failed to initialize TrafficService")
+	}
+
+	// Attach Xray service to payment service
+	paymentService.AttachXrayService(xrayService)
+
+	// Initialize handlers
+	userHandler := handlers.NewUserHandler(authService, paymentService, xrayService, trafficService) // Pass TrafficService
 	adminHandler := handlers.NewAdminHandler(userRepo)
 	xrayHandler := handlers.NewXrayHandler(xrayService)
+	trafficHandler := handlers.NewTrafficHandler(trafficService) // Initialize TrafficHandler
 
-	// Роутер
+	// Initialize router
 	r := mux.NewRouter()
 
-	// Пользовательские роуты
+	// Middleware
+	r.Use(middleware.LoggingMiddleware)
+	r.Use(middleware.RecoveryMiddleware)
+
+	// Public routes
 	r.HandleFunc("/register", userHandler.Register).Methods("POST")
 	r.HandleFunc("/login", userHandler.Login).Methods("POST")
 
-	// Админские роуты
-	r.HandleFunc("/admin/users", adminHandler.GetAllUsers).Methods("GET")
-	r.HandleFunc("/admin/ban/{id}", adminHandler.BanUser).Methods("POST")
+	// User routes
+	userRouter := r.PathPrefix("/user").Subrouter()
+	userRouter.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+	userRouter.HandleFunc("/me", userHandler.GetMe).Methods("GET")
+	userRouter.HandleFunc("/change-tariff", userHandler.ChangeTariff).Methods("POST")
+	userRouter.HandleFunc("/traffic", trafficHandler.GetTraffic).Methods("GET")                        // Add traffic route
+	userRouter.HandleFunc("/delete-account", userHandler.DeleteAccount).Methods("POST")                // Add delete account route
+	userRouter.HandleFunc("/request-password-reset", userHandler.RequestPasswordReset).Methods("POST") // Add request password reset route
 
-	// Xray
-	r.HandleFunc("/xray/restart", xrayHandler.Restart).Methods("POST")
-	r.HandleFunc("/xray/reload", xrayHandler.ReloadConfig).Methods("POST")
+	// Xray config route
+	userRouter.HandleFunc("/config", handlers.NewConfigHandler(xrayService).GetConfig).Methods("GET")
 
-	log.Println("🚀 Сервер запущен на :8080")
-	err = http.ListenAndServe(":8080", r)
-	if err != nil {
-		log.Fatalf("Ошибка запуска сервера: %v", err)
+	// Admin routes
+	adminRouter := r.PathPrefix("/admin").Subrouter()
+	adminRouter.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+	adminRouter.Use(middleware.AdminOnlyMiddleware(cfg.AdminToken))
+	adminRouter.HandleFunc("/users", adminHandler.GetAllUsers).Methods("GET")
+	adminRouter.HandleFunc("/ban/{id}", adminHandler.BanUser).Methods("POST")
+
+	// Xray routes
+	xrayRouter := r.PathPrefix("/xray").Subrouter()
+	xrayRouter.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+	xrayRouter.Use(middleware.AdminOnlyMiddleware(cfg.AdminToken))
+	xrayRouter.HandleFunc("/reload", xrayHandler.ReloadConfig).Methods("POST")
+	xrayRouter.HandleFunc("/restart", xrayHandler.Restart).Methods("POST")
+
+	// CORS setup
+	headersOk := gorillaHandlers.AllowedHeaders([]string{"Content-Type", "Authorization"})
+	originsOk := gorillaHandlers.AllowedOrigins([]string{"*"})
+	methodsOk := gorillaHandlers.AllowedMethods([]string{"GET", "HEAD", "POST", "PUT", "OPTIONS"})
+	// HTTP Server configuration
+	server := &http.Server{
+		Addr:         fmt.Sprintf(":%s", cfg.ServerPort),
+		Handler:      gorillaHandlers.CORS(originsOk, headersOk, methodsOk)(r),
+		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	// Start server
+	log.Printf("Server listening on port %s", cfg.ServerPort)
+	if err := server.ListenAndServe(); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
 	}
 }

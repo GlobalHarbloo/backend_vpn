@@ -1,94 +1,142 @@
 package repository
 
 import (
-	"database/sql"
-	"errors"
-	"vpn-backend/internal/db"
+	"fmt"
+	"time"
 	"vpn-backend/internal/models"
+
+	"gorm.io/gorm"
 )
 
 type UserRepository struct {
-	DB *sql.DB
+	DB *gorm.DB
 }
 
-func NewUserRepository() *UserRepository {
-	return &UserRepository{DB: db.DB}
+func NewUserRepository(db *gorm.DB) *UserRepository {
+	return &UserRepository{DB: db}
+}
+
+func (r *UserRepository) Delete(userID int) error {
+	result := r.DB.Delete(&models.User{}, userID)
+	if result.Error != nil {
+		return fmt.Errorf("failed to delete user: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
 }
 
 func (r *UserRepository) CreateUser(user *models.User) error {
-	query := `
-		INSERT INTO users (email, password, uuid, tariff_id, created_at, is_banned)
-		VALUES ($1, $2, $3, $4, NOW(), false)
-		RETURNING id, created_at
-	`
-	err := r.DB.QueryRow(query, user.Email, user.Password, user.UUID, user.TariffID).Scan(&user.ID, &user.CreatedAt)
-	return err
+	result := r.DB.Create(user)
+	if result.Error != nil {
+		return fmt.Errorf("failed to create user: %w", result.Error)
+	}
+	return nil
+}
+
+func (r *UserRepository) FindByID(userID int) (*models.User, error) {
+	var user models.User
+	result := r.DB.First(&user, userID)
+	if result.Error != nil {
+		return nil, fmt.Errorf("user not found: %w", result.Error)
+	}
+	return &user, nil
 }
 
 func (r *UserRepository) GetUserByEmail(email string) (*models.User, error) {
-	user := &models.User{}
-	query := `SELECT id, email, password, uuid, tariff_id, created_at, is_banned FROM users WHERE email = $1`
-	err := r.DB.QueryRow(query, email).Scan(
-		&user.ID, &user.Email, &user.Password, &user.UUID, &user.TariffID, &user.CreatedAt, &user.IsBanned,
-	)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil // пользователь не найден
-		}
-		return nil, err
+	var user models.User
+	result := r.DB.Where("email = ?", email).First(&user)
+	if result.Error != nil {
+		return nil, fmt.Errorf("user not found: %w", result.Error)
 	}
-	return user, nil
+	return &user, nil
 }
 
 func (r *UserRepository) GetUserByUUID(uuid string) (*models.User, error) {
-	user := &models.User{}
-	query := `SELECT id, email, password, uuid, tariff_id, created_at, is_banned FROM users WHERE uuid = $1`
-	err := r.DB.QueryRow(query, uuid).Scan(
-		&user.ID, &user.Email, &user.Password, &user.UUID, &user.TariffID, &user.CreatedAt, &user.IsBanned,
-	)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
+	var user models.User
+	result := r.DB.Where("uuid = ?", uuid).First(&user)
+	if result.Error != nil {
+		return nil, fmt.Errorf("user not found: %w", result.Error)
 	}
-	return user, nil
+	return &user, nil
 }
 
-func (r *UserRepository) UpdateTariff(userID, tariffID int) error {
-	query := `UPDATE users SET tariff_id = $1 WHERE id = $2`
-	_, err := r.DB.Exec(query, tariffID, userID)
-	return err
+func (r *UserRepository) UpdateUserTariff(userID int, tariffID int) error {
+	result := r.DB.Model(&models.User{}).Where("id = ?", userID).Update("tariff_id", tariffID)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update user tariff: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
 }
 
 func (r *UserRepository) GetAllUsers() ([]models.User, error) {
-	rows, err := r.DB.Query(`SELECT id, email, password, uuid, tariff_id, created_at, is_banned FROM users`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var users []models.User
-	for rows.Next() {
-		var u models.User
-		err := rows.Scan(
-			&u.ID, &u.Email, &u.Password, &u.UUID, &u.TariffID, &u.CreatedAt, &u.IsBanned,
-		)
-		if err != nil {
-			return nil, err
-		}
-		users = append(users, u)
+	result := r.DB.Find(&users)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get all users: %w", result.Error)
 	}
-
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-
 	return users, nil
 }
 
 func (r *UserRepository) BanUser(userID int, ban bool) error {
-	query := `UPDATE users SET is_banned = $1 WHERE id = $2`
-	_, err := r.DB.Exec(query, ban, userID)
-	return err
+	result := r.DB.Model(&models.User{}).Where("id = ?", userID).Update("is_banned", ban)
+	if result.Error != nil {
+		return fmt.Errorf("failed to ban user: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
+}
+
+func (r *UserRepository) GetUserByTelegramID(telegramID int64) (*models.User, error) {
+	var user models.User
+	result := r.DB.Where("telegram_id = ?", telegramID).First(&user)
+	if result.Error != nil {
+		return nil, fmt.Errorf("user not found: %w", result.Error)
+	}
+	return &user, nil
+}
+
+func (r *UserRepository) UpdateUserTelegramID(userID int, telegramID int64) error {
+	result := r.DB.Model(&models.User{}).Where("id = ?", userID).Update("telegram_id", telegramID)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update user telegram_id: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
+}
+
+func (r *UserRepository) UpdateTariffExpiry(userID int, expiryDate time.Time) error {
+	result := r.DB.Model(&models.User{}).Where("id = ?", userID).Update("tariff_expires_at", expiryDate)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update tariff expiry: %w", result.Error)
+	}
+	return nil
+}
+
+func (r *UserRepository) GetTariffExpiry(userID int) (time.Time, error) {
+	var user models.User
+	result := r.DB.Select("tariff_expires_at").First(&user, userID)
+	if result.Error != nil {
+		return time.Time{}, fmt.Errorf("failed to get tariff expiry: %w", result.Error)
+	}
+	return user.TariffExpiresAt, nil
+}
+
+func (r *UserRepository) UpdateUsedTraffic(userID int, traffic int64) error {
+	result := r.DB.Model(&models.User{}).Where("id = ?", userID).Update("used_traffic", traffic)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update used traffic: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
 }

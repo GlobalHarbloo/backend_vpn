@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"vpn-backend/internal/services"
+	"vpn-backend/internal/utils"
+
+	"github.com/google/uuid"
 )
 
 type AuthHandler struct {
@@ -19,54 +21,50 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var data struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
-		UUID     string `json:"uuid"`
-		TariffID int    `json:"tariff_id"`
 	}
 
-	// Обработка ошибок при декодировании JSON
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		log.Printf("Error decoding JSON: %v", err)
+		utils.RespondWithError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	user, err := h.Auth.Register(data.Email, data.Password, data.UUID, data.TariffID)
+	uuidStr := uuid.New().String()
+	const baseTariffID = 1 // Lite
+
+	user, err := h.Auth.Register(data.Email, data.Password, uuidStr, baseTariffID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		log.Printf("Error during registration: %v", err)
+		utils.RespondWithError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	// Установка заголовка Content-Type
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(user); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		log.Printf("Error encoding JSON: %v", err)
-	}
+	utils.RespondWithJSON(w, http.StatusCreated, user)
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var data struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email      string `json:"email"`
+		Password   string `json:"password"`
+		TelegramID int64  `json:"telegram_id,omitempty"`
 	}
 
-	// Обработка ошибок при декодировании JSON
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		log.Printf("Error decoding JSON: %v", err)
+		utils.RespondWithError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	token, err := h.Auth.AuthenticateUser(data.Email, data.Password)
+	var token string
+	var err error
+
+	if data.TelegramID != 0 {
+		token, err = h.Auth.AuthenticateByTelegramID(data.TelegramID)
+	} else {
+		token, err = h.Auth.AuthenticateUser(data.Email, data.Password)
+	}
+
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
-		log.Printf("Login error: %v", err)
+		utils.RespondWithError(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 
-	// Установка заголовка Content-Type
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"token":"` + token + `"}`))
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"token": token})
 }

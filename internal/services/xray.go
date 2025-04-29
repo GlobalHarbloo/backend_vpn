@@ -3,7 +3,6 @@ package services
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -14,83 +13,97 @@ import (
 )
 
 type XrayService struct {
-	repo repository.UserRepository
+	Repo         *repository.UserRepository
+	ConfigPath   string
+	TemplatePath string
 }
 
-func NewXrayService(repo repository.UserRepository) *XrayService {
-	return &XrayService{repo: repo}
-}
-
-const (
-	xrayConfigPath   = "/etc/xray/config.json"
-	xrayTemplatePath = "/etc/xray/config_template.json"
-	xrayServiceName  = "xray" // можно заменить на имя docker-контейнера
-)
-
-func (s *XrayService) AddUser(uuid, email string) error {
-	users, err := s.repo.GetAllUsers()
-	if err != nil {
-		return err
+func NewXrayService(repo *repository.UserRepository, configPath string, templatePath string) *XrayService {
+	return &XrayService{
+		Repo:         repo,
+		ConfigPath:   configPath,
+		TemplatePath: templatePath,
 	}
-	users = append(users, models.User{UUID: uuid, Email: email})
-	return s.RegenerateConfig(users)
 }
 
-func (s *XrayService) RemoveUser(uuid string) error {
-	users, err := s.repo.GetAllUsers()
+func (s *XrayService) RegenerateConfig() error {
+	users, err := s.Repo.GetAllUsers()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get all users: %w", err)
 	}
-	filtered := make([]models.User, 0)
-	for _, u := range users {
-		if u.UUID != uuid {
-			filtered = append(filtered, u)
+
+	// Оставляем только не заблокированных
+	activeUsers := make([]models.User, 0)
+	for _, user := range users {
+		if !user.IsBanned {
+			activeUsers = append(activeUsers, user)
 		}
 	}
-	return s.RegenerateConfig(filtered)
-}
 
-func (s *XrayService) RegenerateConfig(users []models.User) error {
-	log.Println("🔄 Генерация Xray конфигурации...")
-
-	tmplContent, err := os.ReadFile(xrayTemplatePath)
+	templateBytes, err := os.ReadFile(s.TemplatePath)
 	if err != nil {
-		return fmt.Errorf("не удалось прочитать шаблон: %w", err)
+		return fmt.Errorf("failed to read template file: %w", err)
 	}
 
-	tmpl, err := template.New("xray").Parse(string(tmplContent))
+	tpl, err := template.New("xray").Parse(string(templateBytes))
 	if err != nil {
-		return fmt.Errorf("ошибка разбора шаблона: %w", err)
+		return fmt.Errorf("failed to parse template: %w", err)
 	}
 
 	var buf bytes.Buffer
-	err = tmpl.Execute(&buf, struct{ Users []models.User }{users})
-	if err != nil {
-		return fmt.Errorf("ошибка генерации файла: %w", err)
+	if err := tpl.Execute(&buf, map[string]interface{}{"Users": activeUsers}); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
 	}
 
-	var js map[string]interface{}
-	if err := json.Unmarshal(buf.Bytes(), &js); err != nil {
-		return fmt.Errorf("некорректный JSON: %w", err)
+	if !json.Valid(buf.Bytes()) {
+		return fmt.Errorf("invalid JSON generated")
 	}
 
-	err = os.WriteFile(xrayConfigPath, buf.Bytes(), 0644)
-	if err != nil {
-		return fmt.Errorf("ошибка записи файла: %w", err)
+	// Резервная копия текущего конфига
+	if err := os.Rename(s.ConfigPath, s.ConfigPath+".bak"); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to backup config file: %w", err)
 	}
 
-	log.Println("✅ Конфигурация Xray успешно обновлена.")
+	if err := os.WriteFile(s.ConfigPath, buf.Bytes(), 0644); err != nil {
+		_ = os.Rename(s.ConfigPath+".bak", s.ConfigPath)
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
 	return nil
 }
 
 func (s *XrayService) RestartXray() error {
-	log.Println("🔁 Перезапуск Xray...")
-	cmd := exec.Command("systemctl", "restart", xrayServiceName)
-	err := cmd.Run()
+	cmd := exec.Command("systemctl", "restart", "xray")
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("❌ Ошибка при перезапуске: %v", err)
-		return errors.New("не удалось перезапустить Xray")
+		return fmt.Errorf("failed to restart Xray: %w, output: %s", err, string(output))
 	}
-	log.Println("✅ Xray перезапущен.")
+	log.Printf("Xray restarted successfully, output: %s", string(output))
 	return nil
+}
+
+func (s *XrayService) GenerateUserConfig(user *models.User) ([]byte, error) {
+	templateBytes, err := os.ReadFile(s.TemplatePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read template file: %w", err)
+	}
+
+	tpl, err := template.New("user_xray").Parse(string(templateBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tpl.Execute(&buf, map[string]interface{}{
+		"User":   user,
+		"Tariff": user.Tariff,
+	}); err != nil {
+		return nil, fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	if !json.Valid(buf.Bytes()) {
+		return nil, fmt.Errorf("invalid JSON generated for user config")
+	}
+
+	return buf.Bytes(), nil
 }

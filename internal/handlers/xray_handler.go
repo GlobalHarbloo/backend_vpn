@@ -1,40 +1,32 @@
 package handlers
 
 import (
-	"encoding/json"
+	"fmt"
 	"net/http"
 	"vpn-backend/internal/services"
+	"vpn-backend/internal/utils"
 )
 
 type XrayHandler struct {
-	service *services.XrayService
+	Service *services.XrayService
 }
 
-func NewXrayHandler(service *services.XrayService) *XrayHandler {
-	return &XrayHandler{service: service}
+func NewXrayHandler(s *services.XrayService) *XrayHandler {
+	return &XrayHandler{Service: s}
 }
 
 func (h *XrayHandler) ReloadConfig(w http.ResponseWriter, r *http.Request) {
-	users, err := h.service.Repo().GetAllUsers()
-	if err != nil {
-		http.Error(w, "Ошибка получения пользователей", http.StatusInternalServerError)
+	if err := h.Service.RegenerateConfig(); err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Config reload failed: %v", err))
 		return
 	}
-	err = h.service.RegenerateConfig(users)
-	if err != nil {
-		http.Error(w, "Ошибка генерации конфига", http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "config updated"})
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "config reloaded"})
 }
 
 func (h *XrayHandler) Restart(w http.ResponseWriter, r *http.Request) {
-	err := h.service.RestartXray()
-	if err != nil {
-		http.Error(w, "Ошибка перезапуска Xray", http.StatusInternalServerError)
+	if err := h.Service.RestartXray(); err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Restart failed: %v", err))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "xray restarted"})
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "xray restarted"})
 }

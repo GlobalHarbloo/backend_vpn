@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"vpn-backend/internal/middleware"
 	"vpn-backend/internal/services"
 	"vpn-backend/internal/utils"
 )
@@ -16,7 +17,7 @@ func NewConfigHandler(x *services.XrayService) *ConfigHandler {
 
 func (h *ConfigHandler) RegenerateConfig(w http.ResponseWriter, r *http.Request) {
 	if err := h.Xray.RegenerateConfig(); err != nil {
-		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to regenerate config")
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to regenerate config: "+err.Error())
 		return
 	}
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "config regenerated"})
@@ -24,8 +25,28 @@ func (h *ConfigHandler) RegenerateConfig(w http.ResponseWriter, r *http.Request)
 
 func (h *ConfigHandler) RestartXray(w http.ResponseWriter, r *http.Request) {
 	if err := h.Xray.RestartXray(); err != nil {
-		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to restart Xray")
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to restart Xray: "+err.Error())
 		return
 	}
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "xray restarted"})
+}
+
+func (h *ConfigHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	user, err := h.Xray.Repo.FindByID(userID)
+	if err != nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	config, err := h.Xray.GenerateUserConfig(user)
+	if err != nil {
+		http.Error(w, "Failed to generate config", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(config)
 }

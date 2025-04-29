@@ -1,8 +1,7 @@
 package services
 
 import (
-	"errors"
-	"os"
+	"fmt"
 	"time"
 	"vpn-backend/internal/models"
 	"vpn-backend/internal/repository"
@@ -11,72 +10,105 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-var jwtKey = []byte(os.Getenv("JWT_SECRET")) // Читаем из переменных окружения
-
 type AuthService struct {
-	Repo *repository.UserRepository
+	UserRepo  *repository.UserRepository
+	jwtSecret string
 }
 
-func NewAuthService(repo *repository.UserRepository) *AuthService {
-	return &AuthService{Repo: repo}
-}
-
-// ✅ Регистрация по полям (используется в ручке)
-func (a *AuthService) Register(email, password, uuid string, tariffID int) (*models.User, error) {
-	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, err
+func NewAuthService(userRepo *repository.UserRepository, jwtSecret string) *AuthService {
+	return &AuthService{
+		UserRepo:  userRepo,
+		jwtSecret: jwtSecret,
 	}
+}
+
+func (a *AuthService) Register(email, password, uuid string, tariffID int) (*models.User, error) {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash password: %w", err)
+	}
+
 	user := &models.User{
 		Email:    email,
-		Password: string(hashedPwd),
+		Password: string(hashedPassword),
 		UUID:     uuid,
 		TariffID: tariffID,
+		IsBanned: false,
 	}
-	err = a.Repo.CreateUser(user)
-	return user, err
+
+	if err := a.UserRepo.CreateUser(user); err != nil {
+		return nil, fmt.Errorf("failed to create user: %w", err)
+	}
+
+	return user, nil
 }
 
-// ✅ Метод для регистрации из User модели
-func (a *AuthService) RegisterUser(user *models.User) error {
-	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-	user.Password = string(hashedPwd)
-	return a.Repo.CreateUser(user)
-}
-
-// ✅ Метод логина
 func (a *AuthService) AuthenticateUser(email, password string) (string, error) {
-	user, err := a.Repo.GetUserByEmail(email)
-	if err != nil || user == nil {
-		return "", errors.New("user not found")
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
-		return "", errors.New("invalid credentials")
+	user, err := a.UserRepo.GetUserByEmail(email)
+	if err != nil {
+		return "", fmt.Errorf("invalid credentials")
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": user.ID,
-		"exp":     time.Now().Add(30 * 24 * time.Hour).Unix(),
-	})
-	tokenStr, err := token.SignedString(jwtKey)
-	return tokenStr, err
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
+		return "", fmt.Errorf("invalid credentials")
+	}
+
+	token, err := a.GenerateJWT(int(user.ID))
+	if err != nil {
+		return "", fmt.Errorf("failed to generate token: %w", err)
+	}
+
+	return token, nil
 }
 
-// ✅ Парсинг JWT
-func ParseJWT(tokenStr string) (int, error) {
-	claims := jwt.MapClaims{}
-	_, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
-		return jwtKey, nil
-	})
+func (a *AuthService) GenerateJWT(userID int) (string, error) {
+	expirationTime := time.Now().Add(24 * time.Hour)
+	claims := &jwt.MapClaims{
+		"user_id": userID,
+		"exp":     expirationTime.Unix(),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(a.jwtSecret))
 	if err != nil {
-		return 0, err
+		return "", fmt.Errorf("failed to sign token: %w", err)
 	}
-	userID, ok := claims["user_id"].(float64)
+
+	return tokenString, nil
+}
+
+func ParseJWT(tokenString string, jwtSecret string) (int, error) {
+	claims := jwt.MapClaims{}
+	token, err := jwt.ParseWithClaims(tokenString, &claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(jwtSecret), nil
+	})
+
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse token: %w", err)
+	}
+
+	if !token.Valid {
+		return 0, fmt.Errorf("invalid token")
+	}
+
+	userIDFloat, ok := claims["user_id"].(float64)
 	if !ok {
-		return 0, errors.New("invalid token")
+		return 0, fmt.Errorf("invalid user ID in token")
 	}
-	return int(userID), nil
+
+	userID := int(userIDFloat)
+	return userID, nil
+}
+
+func (a *AuthService) AuthenticateByTelegramID(telegramID int64) (string, error) {
+	user, err := a.UserRepo.GetUserByTelegramID(telegramID)
+	if err != nil {
+		return "", fmt.Errorf("invalid credentials")
+	}
+	token, err := a.GenerateJWT(int(user.ID))
+	if err != nil {
+		return "", fmt.Errorf("failed to generate token: %w", err)
+	}
+
+	return token, nil
 }
