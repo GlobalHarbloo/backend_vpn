@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 	"vpn-backend/internal/middleware"
@@ -36,53 +35,54 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		utils.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
+		utils.RespondWithError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	uuid := uuid.New().String()
-	const baseTariffID = 1 // Lite
 
-	user, err := h.Auth.Register(data.Email, data.Password, uuid, baseTariffID)
+	uuidStr := uuid.New().String()
+	const baseTariffID = 1 // Базовый тариф
+
+	user, err := h.Auth.Register(data.Email, data.Password, uuidStr, baseTariffID)
 	if err != nil {
 		utils.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("Registration failed: %v", err))
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(user); err != nil {
-		log.Printf("Error encoding JSON: %v", err)
-		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to encode response")
+	// Добавление пользователя в конфигурацию Xray
+	if err := h.Xray.AddUserToConfig(user); err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to update Xray config")
 		return
 	}
 
-	// Regenerate Xray config and restart Xray
-	if err := h.Xray.RegenerateConfig(); err != nil {
-		log.Printf("Error regenerating Xray config: %v", err)
-		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to regenerate Xray config")
-		return
-	}
+	// Перезапуск Xray
+	h.Xray.ScheduleRestart()
 
-	if err := h.Xray.RestartXray(); err != nil {
-		log.Printf("Error restarting Xray: %v", err)
-		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to restart Xray")
-		return
-	}
+	utils.RespondWithJSON(w, http.StatusCreated, user)
 }
 
 func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var data struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email      string `json:"email"`
+		Password   string `json:"password"`
+		TelegramID int64  `json:"telegram_id,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		utils.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
+		utils.RespondWithError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	token, err := h.Auth.AuthenticateUser(data.Email, data.Password)
+	var token string
+	var err error
+
+	if data.TelegramID != 0 {
+		token, err = h.Auth.AuthenticateByTelegramID(data.TelegramID)
+	} else {
+		token, err = h.Auth.AuthenticateUser(data.Email, data.Password)
+	}
+
 	if err != nil {
-		utils.RespondWithError(w, http.StatusUnauthorized, fmt.Sprintf("Authentication failed: %v", err))
+		utils.RespondWithError(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 
@@ -110,20 +110,18 @@ func (h *UserHandler) ChangeTariff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	user, err := h.Auth.UserRepo.FindByID(userID)
+	if err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to find user")
+		return
+	}
+
+	if err := h.Xray.UpdateUserTariff(user.UUID, data.TariffID); err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to update Xray config")
+		return
+	}
+
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "tariff changed"})
-
-	// Regenerate Xray config and restart Xray
-	if err := h.Xray.RegenerateConfig(); err != nil {
-		log.Printf("Error regenerating Xray config: %v", err)
-		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to regenerate Xray config")
-		return
-	}
-
-	if err := h.Xray.RestartXray(); err != nil {
-		log.Printf("Error restarting Xray: %v", err)
-		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to restart Xray")
-		return
-	}
 }
 
 func (h *UserHandler) UpgradeTariff(w http.ResponseWriter, r *http.Request) {
@@ -179,7 +177,7 @@ func (h *UserHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 		Traffic   int64     `json:"traffic"`
 		ExpiresAt time.Time `json:"expires_at"`
 	}{
-		ID:        int(user.ID), // Convert uint to int
+		ID:        int(user.ID),
 		Email:     user.Email,
 		UUID:      user.UUID,
 		TariffID:  user.TariffID,
@@ -189,8 +187,6 @@ func (h *UserHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 
 	utils.RespondWithJSON(w, http.StatusOK, resp)
 }
-
-// New method to handle account deletion
 func (h *UserHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r)
 	if !ok {
@@ -198,11 +194,33 @@ func (h *UserHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Auth.UserRepo.Delete(int(userID)); err != nil {
-		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to delete account")
+	tx := h.Auth.UserRepo.DB.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	user, err := h.Auth.UserRepo.FindByID(userID)
+	if err != nil {
+		tx.Rollback()
+		utils.RespondWithError(w, http.StatusNotFound, "User not found")
 		return
 	}
 
+	if err := h.Xray.RemoveUserFromConfig(user.UUID); err != nil {
+		tx.Rollback()
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to update Xray config")
+		return
+	}
+
+	if err := h.Auth.UserRepo.Delete(userID); err != nil {
+		tx.Rollback()
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to delete user")
+		return
+	}
+
+	tx.Commit()
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "account deleted"})
 }
 
@@ -220,4 +238,14 @@ func (h *UserHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Reques
 	// TODO: Implement password reset request logic (e.g., send email with reset link)
 	// For now, just return a success message
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "password reset initiated"})
+}
+
+func (h *UserHandler) CheckToken(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r)
+	if !ok {
+		utils.RespondWithError(w, http.StatusUnauthorized, "Invalid token")
+		return
+	}
+
+	utils.RespondWithJSON(w, http.StatusOK, map[string]int{"user_id": userID})
 }

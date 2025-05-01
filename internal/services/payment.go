@@ -32,21 +32,24 @@ func (p *PaymentService) XrayService() *XrayService {
 }
 
 func (p *PaymentService) ChangeTariff(userID int, tariffID int) error {
+	// Проверяем, существует ли пользователь
 	_, err := p.UserRepo.FindByID(userID)
 	if err != nil {
 		return fmt.Errorf("user not found: %w", err)
 	}
 
+	// Проверяем, существует ли тариф
 	_, err = p.TariffRepo.FindByID(tariffID)
 	if err != nil {
 		return fmt.Errorf("tariff not found: %w", err)
 	}
 
+	// Обновляем тариф пользователя
 	if err := p.UserRepo.UpdateUserTariff(userID, tariffID); err != nil {
 		return fmt.Errorf("failed to update user tariff: %w", err)
 	}
 
-	// Обновляем дату окончания подписки после смены тарифа
+	// Обновляем дату окончания подписки
 	expiry := time.Now().AddDate(0, 1, 0)
 	if err := p.UserRepo.UpdateTariffExpiry(userID, expiry); err != nil {
 		return fmt.Errorf("failed to update tariff expiry: %w", err)

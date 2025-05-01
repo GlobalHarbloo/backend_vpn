@@ -34,19 +34,22 @@ func (h *ConfigHandler) RestartXray(w http.ResponseWriter, r *http.Request) {
 func (h *ConfigHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		utils.RespondWithError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
+
 	user, err := h.Xray.Repo.FindByID(userID)
 	if err != nil {
-		http.Error(w, "User not found", http.StatusNotFound)
+		utils.RespondWithError(w, http.StatusNotFound, "User not found")
 		return
 	}
+
 	config, err := h.Xray.GenerateUserConfig(user)
 	if err != nil {
-		http.Error(w, "Failed to generate config", http.StatusInternalServerError)
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to generate config")
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(config)
 }

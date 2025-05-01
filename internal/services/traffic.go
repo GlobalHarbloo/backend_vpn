@@ -22,36 +22,28 @@ func NewTrafficService(userRepo *repository.UserRepository, paymentService *Paym
 
 // GetUserTraffic returns the total traffic used by a user.
 func (s *TrafficService) GetUserTraffic(userUUID string) (int64, error) {
-	// Get traffic from Xray API or logs
+	// Получаем трафик из Xray API
 	cmd := exec.Command("xray", "api", "stats", "--server=127.0.0.1:10085", fmt.Sprintf("user>>>%s>>>traffic>>>uplink", userUUID))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return 0, fmt.Errorf("failed to get traffic stats: %w", err)
 	}
 
-	// Parse traffic value
+	// Парсим значение трафика
 	trafficStr := strings.TrimSpace(string(output))
 	traffic, err := strconv.ParseInt(trafficStr, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse traffic value: %w", err)
 	}
 
-	// Get user by UUID
+	// Обновляем использованный трафик в базе данных
 	user, err := s.UserRepo.GetUserByUUID(userUUID)
 	if err != nil {
 		return 0, err
 	}
 
-	// Check traffic limit
-	if ok, err := s.PaymentService.CheckTariffLimit(int(user.ID), traffic); err != nil {
+	if err := s.UserRepo.UpdateUsedTraffic(int(user.ID), traffic); err != nil {
 		return 0, err
-	} else if !ok {
-		if err := s.UserRepo.UpdateUsedTraffic(int(user.ID), traffic); err != nil {
-			return 0, err
-		}
-		if err := s.UserRepo.BanUser(int(user.ID), true); err != nil {
-			return 0, err
-		}
 	}
 
 	return traffic, nil
