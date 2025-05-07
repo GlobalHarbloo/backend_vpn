@@ -140,3 +140,40 @@ func (r *UserRepository) UpdateUsedTraffic(userID int, traffic int64) error {
 	}
 	return nil
 }
+
+func (r *UserRepository) GetPaymentsByUserID(userID int) ([]models.Payment, error) {
+	var payments []models.Payment
+	result := r.DB.Where("user_id = ?", userID).Find(&payments)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get payments: %w", result.Error)
+	}
+	return payments, nil
+}
+
+func (r *UserRepository) GetPaymentByID(userID int, paymentID string) (*models.Payment, error) {
+	var payment models.Payment
+	result := r.DB.Where("id = ? AND user_id = ?", paymentID, userID).First(&payment)
+	if result.Error != nil {
+		return nil, fmt.Errorf("payment not found: %w", result.Error)
+	}
+	return &payment, nil
+}
+
+func (r *UserRepository) CreatePayment(payment *models.Payment) error {
+	result := r.DB.Create(payment)
+	if result.Error != nil {
+		return fmt.Errorf("failed to create payment: %w", result.Error)
+	}
+	return nil
+}
+
+func (r *UserRepository) UpdatePaymentStatus(userID int, paymentID string, status string) error {
+	result := r.DB.Model(&models.Payment{}).Where("id = ? AND user_id = ?", paymentID, userID).Update("status", status)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update payment status: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("payment not found")
+	}
+	return nil
+}

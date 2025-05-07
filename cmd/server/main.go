@@ -32,7 +32,7 @@ func main() {
 	}
 
 	// Auto-migrate database schema
-	err = dbConn.AutoMigrate(&models.User{}, &models.Tariff{})
+	err = dbConn.AutoMigrate(&models.User{}, &models.Tariff{}, &models.Payment{})
 	if err != nil {
 		log.Fatalf("Failed to auto-migrate database: %v", err)
 	}
@@ -70,6 +70,7 @@ func main() {
 	adminHandler := handlers.NewAdminHandler(userRepo)
 	xrayHandler := handlers.NewXrayHandler(xrayService)
 	trafficHandler := handlers.NewTrafficHandler(trafficService) // Initialize TrafficHandler
+	paymentHandler := handlers.NewPaymentHandler(paymentService)
 
 	// Initialize router
 	r := mux.NewRouter()
@@ -90,6 +91,10 @@ func main() {
 	userRouter.HandleFunc("/traffic", trafficHandler.GetTraffic).Methods("GET")                        // Add traffic route
 	userRouter.HandleFunc("/delete-account", userHandler.DeleteAccount).Methods("POST")                // Add delete account route
 	userRouter.HandleFunc("/request-password-reset", userHandler.RequestPasswordReset).Methods("POST") // Add request password reset route
+	userRouter.HandleFunc("/payments", paymentHandler.CreatePayment).Methods("POST")
+	userRouter.HandleFunc("/payments", paymentHandler.GetUserPayments).Methods("GET")
+	userRouter.HandleFunc("/payments/{id}", paymentHandler.GetPaymentByID).Methods("GET")
+	userRouter.HandleFunc("/payments/{id}", paymentHandler.UpdatePaymentStatus).Methods("PUT")
 
 	// Xray config route
 	userRouter.HandleFunc("/config", handlers.NewConfigHandler(xrayService).GetConfig).Methods("GET")

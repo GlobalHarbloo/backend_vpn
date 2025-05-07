@@ -19,45 +19,43 @@ func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
 
+			// Удаляем "Bearer " из заголовка
 			tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
 
+			// Парсим токен
 			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-				// Проверяем, что алгоритм подписи соответствует ожидаемому.
 				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 					return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 				}
-
-				// Возвращаем секретный ключ для проверки подписи.
 				return []byte(jwtSecret), nil
 			})
 
-			if err != nil {
-				http.Error(w, "Invalid token", http.StatusUnauthorized)
+			if err != nil || !token.Valid {
+				http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
 
-			if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-				userID := int(claims["user_id"].(float64)) // извлекаем user_id из claims
-				ctx := context.WithValue(r.Context(), UserIDKey, userID)
-				r = r.WithContext(ctx)
-
-				// TODO: Implement tariff check here
-				// Example:
-				// tariffID := int(claims["tariff_id"].(float64))
-				// if tariffID != 1 { // Basic tariff
-				// 	http.Error(w, "Tariff not allowed", http.StatusForbidden)
-				// 	return
-				// }
-
-				next.ServeHTTP(w, r)
-			} else {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			// Извлекаем user_id из claims
+			claims, ok := token.Claims.(jwt.MapClaims)
+			if !ok || !token.Valid {
+				http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
+
+			userIDFloat, ok := claims["user_id"].(float64)
+			if !ok {
+				http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+
+			// Добавляем user_id в контекст
+			userID := int(userIDFloat)
+			ctx := context.WithValue(r.Context(), UserIDKey, userID)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

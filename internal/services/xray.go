@@ -122,9 +122,11 @@ func (s *XrayService) saveConfig(config map[string]interface{}) error {
 func (s *XrayService) AddUserToConfig(user *models.User) error {
 	config, err := s.loadConfig()
 	if err != nil {
-		return err
+		log.Printf("Error loading Xray config: %v", err)
+		return fmt.Errorf("failed to load Xray config: %w", err)
 	}
 
+	// Проверяем, существует ли пользователь
 	inbounds := config["inbounds"].([]interface{})
 	firstInbound := inbounds[0].(map[string]interface{})
 	settings := firstInbound["settings"].(map[string]interface{})
@@ -132,10 +134,12 @@ func (s *XrayService) AddUserToConfig(user *models.User) error {
 
 	for _, client := range clients {
 		if client.(map[string]interface{})["id"] == user.UUID {
+			log.Printf("User with UUID %s already exists in Xray config", user.UUID)
 			return fmt.Errorf("user already exists in config")
 		}
 	}
 
+	// Добавляем нового пользователя
 	newClient := map[string]interface{}{
 		"id":      user.UUID,
 		"email":   user.Email,
@@ -145,7 +149,12 @@ func (s *XrayService) AddUserToConfig(user *models.User) error {
 	clients = append(clients, newClient)
 	settings["clients"] = clients
 
-	return s.saveConfig(config)
+	if err := s.saveConfig(config); err != nil {
+		log.Printf("Error saving Xray config: %v", err)
+		return fmt.Errorf("failed to save Xray config: %w", err)
+	}
+
+	return nil
 }
 
 func (s *XrayService) RemoveUserFromConfig(userUUID string) error {
