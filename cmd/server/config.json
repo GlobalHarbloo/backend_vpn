@@ -1,0 +1,118 @@
+{
+  "inbounds": [
+    {
+      "port": 10000,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "email": "test@example.com",
+            "id": "a9956e12-2365-4fcb-95f3-d7b1a5cea860",
+            "level": 0
+          },
+          {
+            "email": "test4@example.com",
+            "id": "2f92f755-a991-4c27-a71d-a684af38c147",
+            "level": 0
+          },
+          {
+            "email": "test6@example.com",
+            "id": "c44bb902-0b7f-4161-8f18-437c40aa8403",
+            "level": 0
+          },
+          {
+            "alterId": 0,
+            "email": "text4@example.com",
+            "id": "6e39554e-9a3b-441d-ae83-ad6754d04c2b",
+            "level": 0
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "tls",
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "/root/cosmovpn.space.crt",
+              "keyFile": "/root/cosmovpn.space.key"
+            }
+          ]
+        },
+        "wsSettings": {
+          "path": "/"
+        }
+      }
+    },
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "mtu": 9000,
+      "inet4_address": "172.19.0.1/28",
+      "auto_route": true,
+      "strict_route": true,
+      "endpoint_independent_nat": true,
+      "stack": "system",
+      "sniff": true,
+      "sniff_override_destination": true
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1",
+        "port": 8080
+      },
+      "tag": "api"
+    }
+  ],
+  "dns": {
+    "servers": [
+      "1.1.1.1",
+      "8.8.8.8",
+      "8.8.4.4"
+    ]
+  },
+  "log": {
+    "loglevel": "info"
+  },
+  "outbounds": [
+    {
+      "protocol": "freedom",
+      "tag": "direct"
+    }
+  ],
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserDownlink": true,
+        "statsUserUplink": true
+      }
+    },
+    "system": {
+      "statsInboundDownlink": true,
+      "statsInboundUplink": true
+    }
+  },
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": [
+          "api"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "tun-in"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  "stats": {}
+}

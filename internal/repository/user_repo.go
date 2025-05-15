@@ -37,7 +37,7 @@ func (r *UserRepository) CreateUser(user *models.User) error {
 
 func (r *UserRepository) FindByID(userID int) (*models.User, error) {
 	var user models.User
-	result := r.DB.First(&user, userID)
+	result := r.DB.Preload("Tariff").First(&user, userID) // Добавьте Preload
 	if result.Error != nil {
 		return nil, fmt.Errorf("user not found: %w", result.Error)
 	}

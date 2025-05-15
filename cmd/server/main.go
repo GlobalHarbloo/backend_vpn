@@ -65,6 +65,12 @@ func main() {
 	// Attach Xray service to payment service
 	paymentService.AttachXrayService(xrayService)
 
+	// Generate subscription file
+	err = handlers.GenerateSubscriptionFile("/root/xray/config.json", "subscription.txt")
+	if err != nil {
+		log.Fatalf("Failed to generate subscription.txt: %v", err)
+	}
+
 	// Initialize handlers
 	userHandler := handlers.NewUserHandler(authService, paymentService, xrayService, trafficService) // Pass TrafficService
 	adminHandler := handlers.NewAdminHandler(userRepo)
@@ -83,6 +89,14 @@ func main() {
 	r.HandleFunc("/register", userHandler.Register).Methods("POST")
 	r.HandleFunc("/login", userHandler.Login).Methods("POST")
 
+	// Путь к файлу подписки
+	subscriptionFilePath := "subscription.txt" // или относительный путь, если сервер запускается из этой папки
+
+	// HTTP endpoint для отдачи файла подписки
+	r.HandleFunc("/subscription.txt", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, subscriptionFilePath)
+	}).Methods("GET")
+
 	// User routes
 	userRouter := r.PathPrefix("/user").Subrouter()
 	userRouter.Use(middleware.AuthMiddleware(cfg.JWTSecret))
@@ -95,6 +109,8 @@ func main() {
 	userRouter.HandleFunc("/payments", paymentHandler.GetUserPayments).Methods("GET")
 	userRouter.HandleFunc("/payments/{id}", paymentHandler.GetPaymentByID).Methods("GET")
 	userRouter.HandleFunc("/payments/{id}", paymentHandler.UpdatePaymentStatus).Methods("PUT")
+	userRouter.HandleFunc("/subscription", userHandler.GetSubscription).Methods("GET")
+	userRouter.HandleFunc("/hiddify-config", userHandler.GetHiddifyConfig).Methods("GET")
 
 	// Xray config route
 	userRouter.HandleFunc("/config", handlers.NewConfigHandler(xrayService).GetConfig).Methods("GET")

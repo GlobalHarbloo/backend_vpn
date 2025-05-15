@@ -15,7 +15,7 @@ type Config struct {
 }
 
 func Load() *Config {
-	dbURL := getEnv("DATABASE_URL", "postgres://postgres:password@localhost:5432/vpn?sslmode=disable")
+	dbURL := getEnv("DATABASE_URL", "postgres://glebasik_k:8915720@localhost:5432/vpn?sslmode=disable")
 	serverPort := getEnv("SERVER_PORT", "8081")
 	jwtSecret := getEnv("JWT_SECRET", "your-jwt-secret")
 	adminToken := getEnv("ADMIN_TOKEN", "admin-token")

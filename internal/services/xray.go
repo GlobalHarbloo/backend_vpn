@@ -246,3 +246,46 @@ func (s *XrayService) GenerateUserConfig(user *models.User) ([]byte, error) {
 
 	return buf.Bytes(), nil
 }
+
+func (s *XrayService) GetUserConfigFromFile(user *models.User) ([]byte, error) {
+	config, err := s.loadConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	inbounds, ok := config["inbounds"].([]interface{})
+	if !ok || len(inbounds) == 0 {
+		return nil, fmt.Errorf("no inbounds found in config")
+	}
+	firstInbound := inbounds[0].(map[string]interface{})
+	settings := firstInbound["settings"].(map[string]interface{})
+	clients := settings["clients"].([]interface{})
+
+	// Найти клиента по UUID
+	var userClient map[string]interface{}
+	for _, c := range clients {
+		client := c.(map[string]interface{})
+		if client["id"] == user.UUID {
+			userClient = client
+			break
+		}
+	}
+	if userClient == nil {
+		return nil, fmt.Errorf("user not found in xray config")
+	}
+
+	// Собрать минимальный конфиг для пользователя
+	userConfig := map[string]interface{}{
+		"inbounds": []interface{}{
+			map[string]interface{}{
+				"port":     firstInbound["port"],
+				"protocol": firstInbound["protocol"],
+				"settings": map[string]interface{}{
+					"clients": []interface{}{userClient},
+				},
+			},
+		},
+	}
+
+	return json.MarshalIndent(userConfig, "", "  ")
+}

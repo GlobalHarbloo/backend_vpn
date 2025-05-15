@@ -31,6 +31,7 @@ func (h *ConfigHandler) RestartXray(w http.ResponseWriter, r *http.Request) {
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "xray restarted"})
 }
 
+// GET /user/config
 func (h *ConfigHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r)
 	if !ok {
@@ -44,12 +45,15 @@ func (h *ConfigHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config, err := h.Xray.GenerateUserConfig(user)
+	// Вариант 1: Генерировать по шаблону (оставить как есть)
+	// configBytes, err := h.Xray.GenerateUserConfig(user)
+
+	// Вариант 2: Взять из общего файла Xray только для этого пользователя
+	configBytes, err := h.Xray.GetUserConfigFromFile(user)
 	if err != nil {
-		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to generate config")
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to get config: "+err.Error())
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(config)
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"config": string(configBytes)})
 }
