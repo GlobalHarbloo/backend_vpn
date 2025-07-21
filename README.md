@@ -1,3 +1,104 @@
+# VPN Backend Library
+
+Библиотека для работы с VPN протоколами VLESS и Xray в Android-приложениях.
+
+## Особенности
+
+- Поддержка протоколов VLESS и Xray
+- Интеграция с Android VPN Service
+- Управление TUN устройством
+- Поддержка TLS и WebSocket
+- Автоматическая маршрутизация трафика
+
+## Установка
+
+```bash
+go get github.com/yourusername/vpn-backend
+```
+
+## Использование
+
+### Базовая настройка
+
+```go
+import "github.com/yourusername/vpn-backend"
+
+// Создаем сервис VPN
+vpnService := vpnlib.NewAndroidVPNService()
+
+// Настраиваем TUN устройство
+tun := &vpnlib.TunDevice{
+    FileDescriptor: fd, // File descriptor от Android VPN Service
+    MTU:           1500,
+    Address:       net.ParseIP("10.0.0.2"),
+    Gateway:       net.ParseIP("10.0.0.1"),
+    DNS:           []net.IP{net.ParseIP("8.8.8.8")},
+}
+
+err := vpnService.ConfigureTun(tun)
+if err != nil {
+    // Обработка ошибки
+}
+
+// Настраиваем VLESS
+vlessConfig := &vpnlib.VLESSConfig{
+    Server: "example.com",
+    Port:   443,
+    UUID:   "your-uuid",
+    Flow:   "xtls-rprx-vision",
+}
+
+err = vpnService.ConfigureVLESS(vlessConfig)
+if err != nil {
+    // Обработка ошибки
+}
+
+// Запускаем VPN
+err = vpnService.Start()
+if err != nil {
+    // Обработка ошибки
+}
+
+// Останавливаем VPN
+err = vpnService.Stop()
+if err != nil {
+    // Обработка ошибки
+}
+```
+
+### Настройка Xray
+
+```go
+xrayConfig := &vpnlib.XrayConfig{
+    Server:     "example.com",
+    Port:       443,
+    UUID:       "your-uuid",
+    Security:   "auto",
+    Network:    "ws",
+    Path:       "/path",
+    Host:       "example.com",
+    TLS:        true,
+    SNI:        "example.com",
+    Alpn:       []string{"h2", "http/1.1"},
+    SkipVerify: false,
+}
+
+err := vpnService.ConfigureXray(xrayConfig)
+if err != nil {
+    // Обработка ошибки
+}
+```
+
+## Требования
+
+- Go 1.21 или выше
+- Android API Level 21 или выше
+- Поддержка TUN устройства
+
+## Лицензия
+
+MIT
+
 Базовый URL:
 http://<ваш_сервер>:8081
 
@@ -73,6 +174,21 @@ http://<ваш_сервер>:8081
    {
      "message": "Account deleted successfully"
    }
+
+---
+
+Смена пароля:
+POST /user/change-password
+Заголовки: Authorization: Bearer <токен>
+Тело:
+{
+  "old_password": "oldpass",
+  "new_password": "newpass"
+}
+Ответ:
+{
+  "status": "password changed"
+}
 
 ---
 

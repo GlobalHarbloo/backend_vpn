@@ -289,3 +289,20 @@ func (s *XrayService) GetUserConfigFromFile(user *models.User) ([]byte, error) {
 
 	return json.MarshalIndent(userConfig, "", "  ")
 }
+
+func (s *XrayService) CheckUserInConfig(userUUID string) (bool, error) {
+	config, err := s.loadConfig()
+	if err != nil {
+		return false, err
+	}
+	inbounds := config["inbounds"].([]interface{})
+	firstInbound := inbounds[0].(map[string]interface{})
+	settings := firstInbound["settings"].(map[string]interface{})
+	clients := settings["clients"].([]interface{})
+	for _, client := range clients {
+		if client.(map[string]interface{})["id"] == userUUID {
+			return true, nil
+		}
+	}
+	return false, nil
+}

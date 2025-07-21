@@ -2,7 +2,9 @@ package services
 
 import (
 	"fmt"
+	"log"
 	"os/exec"
+	"time"
 	"vpn-backend/internal/repository"
 )
 
@@ -20,36 +22,44 @@ func NewTrafficService(userRepo *repository.UserRepository, paymentService *Paym
 
 // GetUserTraffic returns the total traffic used by a user.
 func (s *TrafficService) GetUserTraffic(userUUID string) (int64, error) {
-	// Формируем JSON-запрос для uplink
-	uplinkRequest := fmt.Sprintf(`{"jsonrpc":"2.0","method":"StatsService.QueryStats","params":{"pattern":"user>>>%s>>>traffic>>>uplink","reset":false},"id":1}`, userUUID)
+	user, err := s.UserRepo.GetUserByUUID(userUUID)
+	if err != nil {
+		return 0, nil
+	}
+	// Сброс трафика раз в месяц
+	monthAgo := time.Now().AddDate(0, -1, 0)
+	if user.CreatedAt.Before(monthAgo) && user.UsedTraffic > 0 {
+		err := s.UserRepo.UpdateUsedTraffic(int(user.ID), 0)
+		if err != nil {
+			log.Printf("[Traffic] Error resetting traffic for user %s: %v", userUUID, err)
+		}
+		return 0, nil
+	}
 
-	// Отправляем запрос к Xray API
+	uplinkRequest := fmt.Sprintf(`{"jsonrpc":"2.0","method":"StatsService.QueryStats","params":{"pattern":"user>>>%s>>>traffic>>>uplink","reset":false},"id":1}`, userUUID)
 	cmd := exec.Command("curl", "--http0.9", "--silent", "--output", "-", "-X", "POST", "http://127.0.0.1:10085/stats/query", "-H", "Content-Type: application/json", "-d", uplinkRequest)
 	output, err := cmd.Output()
 	if err != nil {
-		return 0, fmt.Errorf("failed to execute curl command: %w", err)
+		log.Printf("[Xray] curl uplink error for user %s: %v", userUUID, err)
+		return 0, nil
 	}
-
-	// Парсим бинарный ответ
 	uplinkTraffic, err := parseTrafficResponse(output)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse uplink traffic: %w", err)
+		log.Printf("[Xray] parse uplink error for user %s: %v", userUUID, err)
+		return 0, nil
 	}
-
-	// Аналогично для downlink
 	downlinkRequest := fmt.Sprintf(`{"jsonrpc":"2.0","method":"StatsService.QueryStats","params":{"pattern":"user>>>%s>>>traffic>>>downlink","reset":false},"id":1}`, userUUID)
 	cmd = exec.Command("curl", "--http0.9", "--silent", "--output", "-", "-X", "POST", "http://127.0.0.1:10085/stats/query", "-H", "Content-Type: application/json", "-d", downlinkRequest)
 	output, err = cmd.Output()
 	if err != nil {
-		return 0, fmt.Errorf("failed to execute curl command: %w", err)
+		log.Printf("[Xray] curl downlink error for user %s: %v", userUUID, err)
+		return 0, nil
 	}
-
 	downlinkTraffic, err := parseTrafficResponse(output)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse downlink traffic: %w", err)
+		log.Printf("[Xray] parse downlink error for user %s: %v", userUUID, err)
+		return 0, nil
 	}
-
-	// Возвращаем суммарный трафик
 	return uplinkTraffic + downlinkTraffic, nil
 }
 

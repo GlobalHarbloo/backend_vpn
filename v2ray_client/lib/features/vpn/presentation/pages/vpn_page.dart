@@ -1,0 +1,231 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_v2ray/flutter_v2ray.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+class VpnPage extends StatefulWidget {
+  const VpnPage({Key? key}) : super(key: key);
+
+  @override
+  State<VpnPage> createState() => _VpnPageState();
+}
+
+class _VpnPageState extends State<VpnPage> {
+  late FlutterV2ray _flutterV2ray;
+  String _status = 'Отключено';
+  bool _isConnected = false;
+  bool _isLoading = false;
+  String? _error;
+  String _selectedConfig = 'ws';
+  bool _ignoreStatusChange = false;
+  V2RayURL? _parser;
+
+  final Map<String, Map<String, dynamic>> _configs = {
+    'ws': {
+      "v": "2",
+      "ps": "openai-ws",
+      "add": "193.124.182.210",
+      "port": "1443",
+      "id": "18b72a2a-a1a6-4f4e-b2fd-997f6060622a",
+      "aid": "0",
+      "net": "ws",
+      "type": "none",
+      "host": "",
+      "path": "/openai",
+      "tls": ""
+    },
+    'reality': {
+      "v": "2",
+      "ps": "openai-reality",
+      "add": "193.124.182.210",
+      "port": "443",
+      "id": "18b72a2a-a1a6-4f4e-b2fd-997f6060622a",
+      "aid": "0",
+      "net": "tcp",
+      "type": "none",
+      "host": "yahoo.com",
+      "path": "",
+      "tls": "reality",
+      "sni": "yahoo.com",
+      "fp": "",
+      "alpn": "",
+      "pbk": "OKwC9g9Skph_WdQyDu9izHZY37bOlU9pA-V4PzbUJWk",
+      "sid": "71fb02"
+    }
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _flutterV2ray = FlutterV2ray(
+      onStatusChanged: (status) {
+        if (_ignoreStatusChange) return;
+        setState(() {
+          final isInstance = status.toString().contains("V2RayStatus");
+          _status = isInstance ? "connected" : "stopped";
+          _isConnected = isInstance;
+          _isLoading = false;
+        });
+        print('[VPN] Status changed: \\${status.toString()}');
+      },
+    );
+  }
+
+  Future<void> _requestNotificationPermission() async {
+    if (await Permission.notification.isDenied) {
+      await Permission.notification.request();
+    }
+  }
+
+  String _encodeVlessLink(Map<String, dynamic> config) {
+    if (config['tls'] == 'reality') {
+      return 'vless://${config['id']}@${config['add']}:${config['port']}?type=tcp&security=reality&sni=${config['sni']}&fp=${config['fp']}&pbk=${config['pbk']}&sid=${config['sid']}&alpn=${config['alpn']}&host=${config['host']}#${config['ps']}';
+    } else {
+      return 'vless://${config['id']}@${config['add']}:${config['port']}?type=ws&path=${Uri.encodeComponent(config['path'])}&encryption=none#${config['ps']}';
+    }
+  }
+
+  Future<void> _connect() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+      _status = 'connecting';
+      _isConnected = false;
+      _ignoreStatusChange = false;
+    });
+    try {
+      await _requestNotificationPermission();
+      await _flutterV2ray.initializeV2Ray();
+      final granted = await _flutterV2ray.requestPermission();
+      if (!granted) {
+        setState(() {
+          _status = 'Нет разрешения';
+          _isLoading = false;
+        });
+        return;
+      }
+      final config = _configs[_selectedConfig]!;
+      _parser = FlutterV2ray.parseFromURL(_encodeVlessLink(config));
+      setState(() {
+        _error = null;
+        _status = 'connected';
+        _isConnected = true;
+        _isLoading = false;
+      });
+      await _flutterV2ray.startV2Ray(
+        remark: _parser!.remark,
+        config: _parser!.getFullConfiguration(),
+        proxyOnly: false,
+      );
+    } catch (e) {
+      setState(() {
+        _status = 'Ошибка';
+        _error = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _disconnect() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+      _status = 'stopped';
+      _isConnected = false;
+      _ignoreStatusChange = true;
+    });
+    try {
+      await _flutterV2ray.stopV2Ray();
+      print('[VPN] stopV2Ray called');
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _status = 'Ошибка';
+        _error = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  String _statusText(String status) {
+    switch (status) {
+      case 'connecting':
+        return 'Подключение...';
+      case 'connected':
+        return 'Подключено';
+      case 'stopped':
+      case 'Отключено':
+        return 'Отключено';
+      case 'Нет разрешения':
+        return 'Нет разрешения';
+      case 'Ошибка':
+        return 'Ошибка';
+      default:
+        return status;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('VPN-клиент')),
+      body: Center(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text('Выберите тип подключения:'),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Radio<String>(
+                    value: 'ws',
+                    groupValue: _selectedConfig,
+                    onChanged: (v) {
+                      setState(() {
+                        _selectedConfig = v!;
+                        _parser = null;
+                      });
+                    },
+                  ),
+                  const Text('VLESS WS'),
+                  Radio<String>(
+                    value: 'reality',
+                    groupValue: _selectedConfig,
+                    onChanged: (v) {
+                      setState(() {
+                        _selectedConfig = v!;
+                        _parser = null;
+                      });
+                    },
+                  ),
+                  const Text('VLESS Reality'),
+                ],
+              ),
+              Text('Статус: ${_statusText(_status)}', style: const TextStyle(fontSize: 20)),
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text('Ошибка: $_error', style: const TextStyle(color: Colors.red)),
+              ],
+              const SizedBox(height: 32),
+              ElevatedButton(
+                onPressed: _isConnected || _isLoading ? null : _connect,
+                child: _isLoading && !_isConnected
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : const Text('Подключиться'),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: !_isConnected || _isLoading ? null : _disconnect,
+                child: _isLoading && _isConnected
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : const Text('Отключиться'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+} 

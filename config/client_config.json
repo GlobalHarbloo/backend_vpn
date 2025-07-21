@@ -1,0 +1,149 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      {
+        "tag": "dns-remote",
+        "address": "1.1.1.1",
+        "address_resolver": "dns-direct"
+      },
+      {
+        "tag": "dns-direct", 
+        "address": "1.1.1.1",
+        "address_resolver": "dns-local",
+        "detour": "direct"
+      },
+      {
+        "tag": "dns-local",
+        "address": "local",
+        "detour": "direct"
+      },
+      {
+        "tag": "dns-block",
+        "address": "rcode://success"
+      }
+    ],
+    "rules": [
+      {
+        "domain": "connectivitycheck.gstatic.com",
+        "server": "dns-remote",
+        "rewrite_ttl": 3000
+      }
+    ],
+    "final": "dns-remote",
+    "independent_cache": true
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "interface_name": "singtun",
+      "inet4_address": "172.19.0.1/28",
+      "mtu": 1500,
+      "stack": "mixed",
+      "auto_route": true,
+      "strict_route": true,
+      "endpoint_independent_nat": true,
+      "sniff": true,
+      "sniff_override_destination": true
+    },
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "127.0.0.1",
+      "listen_port": 12334,
+      "sniff": true,
+      "sniff_override_destination": true
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "vless-out",
+      "server": "193.124.182.210",
+      "server_port": 443,
+      "uuid": "18b72a2a-a1a6-4f4e-b2fd-997f6060622a",
+      "tls": {
+        "enabled": true,
+        "server_name": "yahoo.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
+        "reality": {
+          "enabled": true,
+          "public_key": "Ewr5HbGZ07NPWi1JYzZO8DzYVasXnCGy2OTESXkFvl4",
+          "short_id": "71fb02"
+        }
+      },
+      "packet_encoding": "xudp"
+    },
+    {
+      "type": "dns",
+      "tag": "dns-out"
+    },
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "direct",
+      "tag": "direct-fragment"
+    },
+    {
+      "type": "block",
+      "tag": "block"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "port": 53,
+        "outbound": "dns-out"
+      },
+      {
+        "protocol": ["dns"],
+        "outbound": "dns-out"
+      },
+      {
+        "ip_cidr": [
+          "127.0.0.0/8",
+          "10.0.0.0/8", 
+          "172.16.0.0/12",
+          "192.168.0.0/16",
+          "fc00::/7",
+          "fe80::/10"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "domain": [
+          "openai.com",
+          "api.openai.com",
+          "chat.openai.com",
+          "platform.openai.com"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "domain": [
+          "geosite:category-ads-all"
+        ],
+        "outbound": "block"
+      }
+    ],
+    "final": "vless-out",
+    "auto_detect_interface": true,
+    "geoip": {
+      "path": "./geoip.db", 
+      "download_url": "https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db"
+    },
+    "geosite": {
+      "path": "./geosite.db",
+      "download_url": "https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db"
+    }
+  }
+}

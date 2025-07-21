@@ -141,6 +141,11 @@ func (r *UserRepository) UpdateUsedTraffic(userID int, traffic int64) error {
 	return nil
 }
 
+func (r *UserRepository) ResetAllTraffic() error {
+	result := r.DB.Model(&models.User{}).Update("used_traffic", 0)
+	return result.Error
+}
+
 func (r *UserRepository) GetPaymentsByUserID(userID int) ([]models.Payment, error) {
 	var payments []models.Payment
 	result := r.DB.Where("user_id = ?", userID).Find(&payments)
@@ -176,4 +181,31 @@ func (r *UserRepository) UpdatePaymentStatus(userID int, paymentID string, statu
 		return fmt.Errorf("payment not found")
 	}
 	return nil
+}
+
+func (r *UserRepository) SetPasswordResetToken(email, token string, expiresAt time.Time) error {
+	return r.DB.Model(&models.User{}).Where("email = ?", email).
+		Updates(map[string]interface{}{
+			"password_reset_token": token,
+			"password_reset_expires_at": expiresAt,
+		}).Error
+}
+
+func (r *UserRepository) FindByPasswordResetToken(token string) (*models.User, error) {
+	var user models.User
+	result := r.DB.Where("password_reset_token = ? AND password_reset_expires_at > ?", token, time.Now()).First(&user)
+	if result.Error != nil {
+		return nil, fmt.Errorf("invalid or expired token")
+	}
+	return &user, nil
+}
+
+func (r *UserRepository) UpdatePasswordResetRequestedAt(email string, t time.Time) error {
+	return r.DB.Model(&models.User{}).Where("email = ?", email).Update("password_reset_requested_at", t).Error
+}
+
+func (r *UserRepository) CountPasswordResetRequests(email string, since time.Time) (int64, error) {
+	var count int64
+	r.DB.Model(&models.User{}).Where("email = ? AND password_reset_requested_at > ?", email, since).Count(&count)
+	return count, nil
 }

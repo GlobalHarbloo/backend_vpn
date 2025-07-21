@@ -52,3 +52,12 @@ func (h *AdminHandler) BanUser(w http.ResponseWriter, r *http.Request) {
 	}
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "user ban status updated"})
 }
+
+func (h *AdminHandler) ResetAllTraffic(w http.ResponseWriter, r *http.Request) {
+	err := h.Repo.ResetAllTraffic()
+	if err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to reset traffic")
+		return
+	}
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "traffic reset"})
+}

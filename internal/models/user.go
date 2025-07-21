@@ -17,5 +17,8 @@ type User struct {
 	TelegramID      int64     `json:"telegram_id"`
 	TariffExpiresAt time.Time `json:"tariff_expires_at"`
 	UsedTraffic     int64     `json:"used_traffic"`
+	PasswordResetToken     string    `json:"-"`
+	PasswordResetExpiresAt time.Time `json:"-"`
+	PasswordResetRequestedAt time.Time `json:"-"`
 	Tariff          Tariff    // Add Tariff relation
 }

@@ -1,3 +1,11 @@
 {
-    "cmake.sourceDirectory": "C:/Users/glebs/Desktop/vpn-backend/vpn_app/linux"
+    "cmake.sourceDirectory": "C:/Users/glebs/Desktop/vpn-backend/app_vpn/linux",
+    "files.associations": {
+        "array": "cpp",
+        "tuple": "cpp",
+        "utility": "cpp",
+        "variant": "cpp",
+        "xutility": "cpp",
+        "memory": "cpp"
+    }
 }

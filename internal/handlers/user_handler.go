@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"vpn-backend/internal/utils"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type UserHandler struct {
@@ -57,8 +59,18 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	// Добавление пользователя в конфигурацию Xray
 	if err := h.Xray.AddUserToConfig(user); err != nil {
+		log.Printf("[Xray] Error adding user to config: %v", err)
 		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to update Xray config")
 		return
+	}
+
+	// Проверка, что пользователь есть в clients Xray config
+	if ok, err := h.Xray.CheckUserInConfig(user.UUID); err != nil {
+		log.Printf("[Xray] Error checking user in config: %v", err)
+	} else if !ok {
+		log.Printf("[Xray] User %s NOT found in Xray config after registration", user.UUID)
+	} else {
+		log.Printf("[Xray] User %s successfully added to Xray config", user.UUID)
 	}
 
 	// Перезапуск Xray
@@ -245,20 +257,62 @@ func (h *UserHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "account deleted"})
 }
 
-// New method to handle password reset request
+// Новый endpoint для запроса сброса пароля (заглушка)
 func (h *UserHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 	var data struct {
 		Email string `json:"email"`
 	}
-
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		utils.RespondWithError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	user, err := h.Auth.UserRepo.GetUserByEmail(data.Email)
+	if err != nil {
+		log.Printf("[RESET] Запрос сброса для несуществующего email: %s", data.Email)
+		utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "If email exists, reset link sent"})
+		return
+	}
+	// Антиспам: не более 5 запросов за 30 минут
+	limit := 5
+	window := 30 * time.Minute
+	count, _ := h.Auth.UserRepo.CountPasswordResetRequests(data.Email, time.Now().Add(-window))
+	if count >= int64(limit) {
+		log.Printf("[RESET] Превышен лимит сброса для %s", data.Email)
+		utils.RespondWithError(w, http.StatusTooManyRequests, "Слишком много запросов на сброс пароля. Попробуйте позже.")
+		return
+	}
+	token := uuid.New().String()
+	expiresAt := time.Now().Add(1 * time.Hour)
+	_ = h.Auth.UserRepo.SetPasswordResetToken(data.Email, token, expiresAt)
+	_ = h.Auth.UserRepo.UpdatePasswordResetRequestedAt(data.Email, time.Now())
+	resetLink := fmt.Sprintf("https://your-frontend.com/reset-password?token=%s", token)
+	if err := utils.SendResetEmail(user.Email, resetLink); err != nil {
+		log.Printf("[EMAIL] Ошибка отправки письма: %v", err)
+	}
+	log.Printf("[RESET] Сброс пароля отправлен на %s", user.Email)
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "If email exists, reset link sent"})
+}
 
-	// TODO: Implement password reset request logic (e.g., send email with reset link)
-	// For now, just return a success message
-	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "password reset initiated"})
+func (h *UserHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var data struct {
+		Token    string `json:"token"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		utils.RespondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	user, err := h.Auth.UserRepo.FindByPasswordResetToken(data.Token)
+	if err != nil {
+		utils.RespondWithError(w, http.StatusBadRequest, "Invalid or expired token")
+		return
+	}
+	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(data.Password), bcrypt.DefaultCost)
+	user.Password = string(hashedPassword)
+	user.PasswordResetToken = ""
+	user.PasswordResetExpiresAt = time.Time{}
+	h.Auth.UserRepo.DB.Save(user)
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "password reset successful"})
 }
 
 func (h *UserHandler) CheckToken(w http.ResponseWriter, r *http.Request) {
@@ -406,4 +460,35 @@ func GenerateSubscriptionFile(configPath, outputPath string) error {
 
 	// Записываем в subscription.txt
 	return ioutil.WriteFile(outputPath, []byte(subLines), 0644)
+}
+
+func (h *UserHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r)
+	if !ok {
+		utils.RespondWithError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	var data struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		utils.RespondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	user, err := h.Auth.UserRepo.FindByID(userID)
+	if err != nil {
+		utils.RespondWithError(w, http.StatusNotFound, "User not found")
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(data.OldPassword)); err != nil {
+		utils.RespondWithError(w, http.StatusBadRequest, "Wrong old password")
+		return
+	}
+	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(data.NewPassword), bcrypt.DefaultCost)
+	user.Password = string(hashedPassword)
+	user.PasswordResetToken = ""
+	user.PasswordResetExpiresAt = time.Time{}
+	h.Auth.UserRepo.DB.Save(user)
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "password changed"})
 }

@@ -1,87 +1,137 @@
 {
+  "api": null,
+  "burstObservatory": null,
+  "dns": null,
+  "fakedns": null,
   "inbounds": [
     {
-      "port": 10000,
+      "allocate": null,
+      "listen": "0.0.0.0",
+      "port": 1443,
       "protocol": "vless",
       "settings": {
         "clients": [
           {
-            "email": "test@example.com",
-            "id": "a9956e12-2365-4fcb-95f3-d7b1a5cea860",
-            "level": 0
-          },
-          {
-            "email": "test4@example.com",
-            "id": "2f92f755-a991-4c27-a71d-a684af38c147",
-            "level": 0
-          },
-          {
-            "email": "test6@example.com",
-            "id": "c44bb902-0b7f-4161-8f18-437c40aa8403",
+            "email": "openai@client",
+            "id": "18b72a2a-a1a6-4f4e-b2fd-997f6060622a",
             "level": 0
           },
           {
             "alterId": 0,
-            "email": "text4@example.com",
-            "id": "6e39554e-9a3b-441d-ae83-ad6754d04c2b",
+            "email": "glebsapronov7@gmail.com",
+            "id": "aaad309d-9367-4f26-b270-d0e5c846c857",
+            "level": 0
+          },
+          {
+            "alterId": 0,
+            "email": "test1@gmail.com",
+            "id": "010fa54d-0cf3-49af-ae80-dbb6c84a1522",
+            "level": 0
+          },
+          {
+            "alterId": 0,
+            "email": "test2@gmail.com",
+            "id": "0500a44a-f34c-4999-b0ac-355f2e863a51",
             "level": 0
           }
         ],
         "decryption": "none"
       },
+      "sniffing": null,
       "streamSettings": {
         "network": "ws",
-        "security": "tls",
-        "tlsSettings": {
-          "certificates": [
-            {
-              "certificateFile": "/root/cosmovpn.space.crt",
-              "keyFile": "/root/cosmovpn.space.key"
-            }
-          ]
-        },
+        "security": "none",
         "wsSettings": {
-          "path": "/"
+          "path": "/openai"
         }
-      }
-    },
-    {
-      "type": "tun",
-      "tag": "tun-in",
-      "mtu": 9000,
-      "inet4_address": "172.19.0.1/28",
-      "auto_route": true,
-      "strict_route": true,
-      "endpoint_independent_nat": true,
-      "stack": "system",
-      "sniff": true,
-      "sniff_override_destination": true
-    },
-    {
-      "listen": "127.0.0.1",
-      "port": 10085,
-      "protocol": "dokodemo-door",
-      "settings": {
-        "address": "127.0.0.1",
-        "port": 8080
       },
-      "tag": "api"
+      "tag": ""
+    },
+    {
+      "allocate": {
+        "concurrency": 3,
+        "refresh": 5,
+        "strategy": "always"
+      },
+      "listen": null,
+      "port": 443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "email": "gleb",
+            "flow": "",
+            "id": "18b72a2a-a1a6-4f4e-b2fd-997f6060622a"
+          }
+        ],
+        "decryption": "none",
+        "fallbacks": []
+      },
+      "sniffing": {
+        "destOverride": [
+          "http",
+          "tls",
+          "quic",
+          "fakedns"
+        ],
+        "enabled": false,
+        "metadataOnly": false,
+        "routeOnly": false
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "realitySettings": {
+          "dest": "yahoo.com:443",
+          "maxClient": "",
+          "maxTimediff": 0,
+          "minClient": "",
+          "privateKey": "OKwC9g9Skph_WdQyDu9izHZY37bOlU9pA-V4PzbUJWk",
+          "serverNames": [
+            "yahoo.com",
+            "www.yahoo.com"
+          ],
+          "shortIds": [
+            "71fb02",
+            "37ea6bb7",
+            "0c",
+            "1b57",
+            "b32f473943",
+            "2237b79ad4b911f9",
+            "78a93e237fe157",
+            "a625a2df5256"
+          ],
+          "show": false,
+          "xver": 0
+        },
+        "security": "reality",
+        "tcpSettings": {
+          "acceptProxyProtocol": false,
+          "header": {
+            "type": "none"
+          }
+        }
+      },
+      "tag": "inbound-433"
     }
   ],
-  "dns": {
-    "servers": [
-      "1.1.1.1",
-      "8.8.8.8",
-      "8.8.4.4"
-    ]
-  },
   "log": {
-    "loglevel": "info"
+    "access": "none",
+    "error": "",
+    "loglevel": "warning"
   },
+  "observatory": null,
   "outbounds": [
     {
       "protocol": "freedom",
+      "settings": {
+        "domainStrategy": "UseIP"
+      },
       "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "settings": {},
+      "tag": "blocked"
     }
   ],
   "policy": {
@@ -96,23 +146,31 @@
       "statsInboundUplink": true
     }
   },
+  "reverse": null,
   "routing": {
+    "domainStrategy": "IPIfNonMatch",
     "rules": [
       {
-        "type": "field",
-        "inboundTag": [
-          "api"
+        "domain": [
+          "openai.com",
+          "api.openai.com",
+          "chat.openai.com",
+          "cdn.openai.com",
+          "openaiapi-site.azureedge.net",
+          "oaistatic.com"
         ],
-        "outboundTag": "direct"
+        "outboundTag": "direct",
+        "type": "field"
       },
       {
-        "type": "field",
-        "inboundTag": [
-          "tun-in"
+        "ip": [
+          "geoip:private"
         ],
-        "outboundTag": "direct"
+        "outboundTag": "blocked",
+        "type": "field"
       }
     ]
   },
-  "stats": {}
+  "stats": {},
+  "transport": null
 }

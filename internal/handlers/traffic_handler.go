@@ -24,13 +24,13 @@ func (h *TrafficHandler) GetTraffic(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.Traffic.UserRepo.FindByID(userID)
 	if err != nil {
-		utils.RespondWithError(w, http.StatusNotFound, "User not found")
+		utils.RespondWithJSON(w, http.StatusOK, map[string]int64{"traffic": 0})
 		return
 	}
 
 	traffic, err := h.Traffic.GetUserTraffic(user.UUID)
 	if err != nil {
-		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to get traffic")
+		utils.RespondWithJSON(w, http.StatusOK, map[string]int64{"traffic": 0})
 		return
 	}
 

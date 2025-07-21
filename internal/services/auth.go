@@ -29,11 +29,12 @@ func (a *AuthService) Register(email, password, uuid string, tariffID int) (*mod
 	}
 
 	user := &models.User{
-		Email:    email,
-		Password: string(hashedPassword),
-		UUID:     uuid,
-		TariffID: tariffID,
-		IsBanned: false,
+		Email:       email,
+		Password:    string(hashedPassword),
+		UUID:        uuid,
+		TariffID:    tariffID,
+		IsBanned:    false,
+		UsedTraffic: 0, // Явная инициализация
 	}
 
 	if err := a.UserRepo.CreateUser(user); err != nil {
