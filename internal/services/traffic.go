@@ -1,6 +1,7 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os/exec"
@@ -24,7 +25,7 @@ func NewTrafficService(userRepo *repository.UserRepository, paymentService *Paym
 func (s *TrafficService) GetUserTraffic(userUUID string) (int64, error) {
 	user, err := s.UserRepo.GetUserByUUID(userUUID)
 	if err != nil {
-		return 0, nil
+		return 0, fmt.Errorf("user not found: %w", err)
 	}
 	// Сброс трафика раз в месяц
 	monthAgo := time.Now().AddDate(0, -1, 0)
@@ -36,52 +37,79 @@ func (s *TrafficService) GetUserTraffic(userUUID string) (int64, error) {
 		return 0, nil
 	}
 
-	uplinkRequest := fmt.Sprintf(`{"jsonrpc":"2.0","method":"StatsService.QueryStats","params":{"pattern":"user>>>%s>>>traffic>>>uplink","reset":false},"id":1}`, userUUID)
-	cmd := exec.Command("curl", "--http0.9", "--silent", "--output", "-", "-X", "POST", "http://127.0.0.1:10085/stats/query", "-H", "Content-Type: application/json", "-d", uplinkRequest)
-	output, err := cmd.Output()
-	if err != nil {
-		log.Printf("[Xray] curl uplink error for user %s: %v", userUUID, err)
-		return 0, nil
+	// Если Xray API недоступен, возвращаем сохраненный трафик из БД
+	if user.UsedTraffic > 0 {
+		return user.UsedTraffic, nil
 	}
-	uplinkTraffic, err := parseTrafficResponse(output)
-	if err != nil {
-		log.Printf("[Xray] parse uplink error for user %s: %v", userUUID, err)
-		return 0, nil
+
+	getSum := func(identifier string) int64 {
+		uplinkRequest := fmt.Sprintf(`{"jsonrpc":"2.0","method":"StatsService.QueryStats","params":{"pattern":"user>>>%s>>>traffic>>>uplink","reset":false},"id":1}`, identifier)
+		cmd := exec.Command("curl", "--http0.9", "--silent", "--output", "-", "-X", "POST", "http://127.0.0.1:10085/stats/query", "-H", "Content-Type: application/json", "-d", uplinkRequest)
+		output, err := cmd.Output()
+		if err != nil {
+			return 0
+		}
+		uplinkTraffic, err := parseTrafficResponse(output)
+		if err != nil {
+			uplinkTraffic = 0
+		}
+
+		downlinkRequest := fmt.Sprintf(`{"jsonrpc":"2.0","method":"StatsService.QueryStats","params":{"pattern":"user>>>%s>>>traffic>>>downlink","reset":false},"id":1}`, identifier)
+		cmd = exec.Command("curl", "--http0.9", "--silent", "--output", "-", "-X", "POST", "http://127.0.0.1:10085/stats/query", "-H", "Content-Type: application/json", "-d", downlinkRequest)
+		output, err = cmd.Output()
+		if err != nil {
+			return uplinkTraffic
+		}
+		downlinkTraffic, err := parseTrafficResponse(output)
+		if err != nil {
+			downlinkTraffic = 0
+		}
+		return uplinkTraffic + downlinkTraffic
 	}
-	downlinkRequest := fmt.Sprintf(`{"jsonrpc":"2.0","method":"StatsService.QueryStats","params":{"pattern":"user>>>%s>>>traffic>>>downlink","reset":false},"id":1}`, userUUID)
-	cmd = exec.Command("curl", "--http0.9", "--silent", "--output", "-", "-X", "POST", "http://127.0.0.1:10085/stats/query", "-H", "Content-Type: application/json", "-d", downlinkRequest)
-	output, err = cmd.Output()
-	if err != nil {
-		log.Printf("[Xray] curl downlink error for user %s: %v", userUUID, err)
-		return 0, nil
+
+	byEmail := getSum(user.Email)
+	byUUID := getSum(user.UUID)
+	if byEmail >= byUUID {
+		return byEmail, nil
 	}
-	downlinkTraffic, err := parseTrafficResponse(output)
-	if err != nil {
-		log.Printf("[Xray] parse downlink error for user %s: %v", userUUID, err)
-		return 0, nil
-	}
-	return uplinkTraffic + downlinkTraffic, nil
+	return byUUID, nil
 }
 
 // parseTrafficResponse парсит бинарный ответ от Xray API
 func parseTrafficResponse(response []byte) (int64, error) {
-	// Проверяем длину ответа
-	if len(response) < 8 {
-		return 0, fmt.Errorf("invalid binary response length")
+	// Парсим JSON-ответ от Xray
+	type xrayStat struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      int    `json:"id"`
+		Result  struct {
+			Stat struct {
+				Name  string `json:"name"`
+				Value int64  `json:"value"`
+			} `json:"stat"`
+		} `json:"result"`
 	}
-
-	// Извлекаем значение трафика (например, 8 байт для int64)
-	traffic := int64(response[4])<<24 | int64(response[5])<<16 | int64(response[6])<<8 | int64(response[7])
-
-	return traffic, nil
+	var stat xrayStat
+	err := json.Unmarshal(response, &stat)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse Xray JSON response: %w", err)
+	}
+	return stat.Result.Stat.Value, nil
 }
 
 // TrackTrafficUsage records the traffic usage for a user.
 func (s *TrafficService) TrackTrafficUsage(userUUID string, bytes int64) error {
-	// TODO: Implement the logic to track traffic usage.
-	// This might involve updating a traffic tracking service or database.
-	_ = userUUID
-	_ = bytes
+	user, err := s.UserRepo.GetUserByUUID(userUUID)
+	if err != nil {
+		return fmt.Errorf("user not found: %w", err)
+	}
+
+	// Обновляем использованный трафик в базе данных
+	newTraffic := user.UsedTraffic + bytes
+	if err := s.UserRepo.UpdateUsedTraffic(int(user.ID), newTraffic); err != nil {
+		return fmt.Errorf("failed to update traffic: %w", err)
+	}
+
+	log.Printf("[Traffic] Updated traffic for user %s: +%d bytes, total: %d", userUUID, bytes, newTraffic)
 	return nil
 }
 

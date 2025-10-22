@@ -1,9 +1,24 @@
 {
-  "api": null,
+  "api": {
+    "services": [
+      "StatsService"
+    ],
+    "tag": "api"
+  },
   "burstObservatory": null,
   "dns": null,
   "fakedns": null,
   "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1"
+      },
+      "tag": "api",
+      "network": "tcp"
+    },
     {
       "allocate": null,
       "listen": "0.0.0.0",
@@ -12,26 +27,27 @@
       "settings": {
         "clients": [
           {
-            "email": "openai@client",
-            "id": "18b72a2a-a1a6-4f4e-b2fd-997f6060622a",
-            "level": 0
-          },
-          {
             "alterId": 0,
             "email": "glebsapronov7@gmail.com",
-            "id": "aaad309d-9367-4f26-b270-d0e5c846c857",
+            "id": "b823610f-a57d-4b04-992a-e5213588faae",
             "level": 0
           },
           {
             "alterId": 0,
-            "email": "test1@gmail.com",
-            "id": "010fa54d-0cf3-49af-ae80-dbb6c84a1522",
+            "email": "glebasik_k1@gmail.com",
+            "id": "3abcb8fa-cc72-4d8a-a0ed-335c428e0d56",
             "level": 0
           },
           {
             "alterId": 0,
-            "email": "test2@gmail.com",
-            "id": "0500a44a-f34c-4999-b0ac-355f2e863a51",
+            "email": "glebasik_k@gmail.com",
+            "id": "c9bafc3c-443f-4d74-83ff-ea4a973872ad",
+            "level": 0
+          },
+          {
+            "alterId": 0,
+            "email": "sapron.i8800@gmail.com",
+            "id": "2341d41e-cc72-4834-b7b6-8e58658bb03e",
             "level": 0
           }
         ],
@@ -55,7 +71,7 @@
       },
       "listen": null,
       "port": 443,
-      "protocol": "vless",
+      "protocol": "vmess",
       "settings": {
         "clients": [
           {
@@ -117,7 +133,7 @@
   "log": {
     "access": "none",
     "error": "",
-    "loglevel": "warning"
+    "loglevel": "debug"
   },
   "observatory": null,
   "outbounds": [
@@ -150,6 +166,11 @@
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
+      {
+        "inboundTag": ["api"],
+        "outboundTag": "api",
+        "type": "field"
+      },
       {
         "domain": [
           "openai.com",

@@ -23,7 +23,7 @@ class _RegisterPageState extends State<RegisterPage> {
     try {
       await AuthService.register(_emailController.text, _passwordController.text);
       if (!mounted) return;
-      Navigator.of(context).pushReplacementNamed('/login');
+      Navigator.of(context).pushReplacementNamed('/main');
     } catch (e) {
       setState(() {
         _error = e.toString().replaceAll('Exception: ', '');

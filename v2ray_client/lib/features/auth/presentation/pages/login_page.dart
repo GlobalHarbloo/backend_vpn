@@ -79,6 +79,44 @@ class _LoginPageState extends State<LoginPage> {
                       : () => Navigator.of(context).pushReplacementNamed('/register'),
                   child: const Text('Нет аккаунта? Зарегистрироваться'),
                 ),
+                TextButton(
+                  onPressed: _loading
+                      ? null
+                      : () async {
+                          final emailController = TextEditingController();
+                          final result = await showDialog<String>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Сброс пароля'),
+                              content: TextField(
+                                controller: emailController,
+                                decoration: const InputDecoration(labelText: 'Email'),
+                                keyboardType: TextInputType.emailAddress,
+                              ),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+                                TextButton(onPressed: () => Navigator.pop(ctx, emailController.text), child: const Text('Сбросить')),
+                              ],
+                            ),
+                          );
+                          if (result != null && result.isNotEmpty) {
+                            String? error;
+                            String? success;
+                            try {
+                              await AuthService.requestPasswordReset(result);
+                              success = 'Письмо для сброса пароля отправлено (если email зарегистрирован)';
+                            } catch (e) {
+                              error = e.toString().replaceAll('Exception: ', '');
+                            }
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text(error ?? success ?? '')),
+                              );
+                            }
+                          }
+                        },
+                  child: const Text('Забыли пароль?'),
+                ),
               ],
             ),
           ),

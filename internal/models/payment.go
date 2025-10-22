@@ -9,5 +9,7 @@ type Payment struct {
 	TariffID      int       `json:"tariff_id"`
 	PaymentMethod string    `json:"payment_method"`
 	Status        string    `json:"status"`
+	Provider      string    `json:"provider"`
+	ProviderID    string    `json:"provider_id"`
 	CreatedAt     time.Time `json:"created_at"`
 }

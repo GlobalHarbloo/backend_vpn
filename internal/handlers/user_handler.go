@@ -6,8 +6,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
 	"time"
+	"vpn-backend/config"
 	"vpn-backend/internal/middleware"
 	"vpn-backend/internal/services"
 	"vpn-backend/internal/utils"
@@ -60,6 +60,8 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	// Добавление пользователя в конфигурацию Xray
 	if err := h.Xray.AddUserToConfig(user); err != nil {
 		log.Printf("[Xray] Error adding user to config: %v", err)
+		// Откатываем создание пользователя, чтобы не оставлять несогласованное состояние
+		_ = h.Auth.UserRepo.Delete(int(user.ID))
 		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to update Xray config")
 		return
 	}
@@ -76,20 +78,17 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	// Перезапуск Xray
 	h.Xray.ScheduleRestart()
 
-	// --- ДОБАВЛЕНИЕ В ОБЩИЙ subscription.txt ---
-	subLine := fmt.Sprintf(
-		"vless://%s@193.124.182.210:10000?encryption=none&security=tls&type=ws&path=%%2F#VPNClient\n",
-		user.UUID,
-	)
-	subFilePath := "/path/to/subscription.txt" // Укажите тот же путь, что и в main.go
-	f, err := os.OpenFile(subFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err == nil {
-		_, _ = f.WriteString(subLine)
-		f.Close()
+	// Автоматический вход: выдаем JWT токен сразу после успешной регистрации
+	token, err := h.Auth.GenerateJWT(int(user.ID))
+	if err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to generate token")
+		return
 	}
-	// --- КОНЕЦ ДОБАВЛЕНИЯ ---
 
-	utils.RespondWithJSON(w, http.StatusCreated, user)
+	utils.RespondWithJSON(w, http.StatusCreated, map[string]interface{}{
+		"token": token,
+		"user":  user,
+	})
 }
 
 func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -201,20 +200,26 @@ func (h *UserHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	hasAccess := h.Payment.HasAccess(user)
+
 	resp := struct {
-		ID        int       `json:"id"`
-		Email     string    `json:"email"`
-		UUID      string    `json:"uuid"`
-		TariffID  int       `json:"tariff_id"`
-		Traffic   int64     `json:"traffic"`
-		ExpiresAt time.Time `json:"expires_at"`
+		ID          int       `json:"id"`
+		Email       string    `json:"email"`
+		UUID        string    `json:"uuid"`
+		TariffID    int       `json:"tariff_id"`
+		Traffic     int64     `json:"traffic"`
+		ExpiresAt   time.Time `json:"expires_at"`
+		TrialEndsAt time.Time `json:"trial_ends_at"`
+		HasAccess   bool      `json:"has_access"`
 	}{
-		ID:        int(user.ID),
-		Email:     user.Email,
-		UUID:      user.UUID,
-		TariffID:  user.TariffID,
-		Traffic:   traffic,
-		ExpiresAt: expiry,
+		ID:          int(user.ID),
+		Email:       user.Email,
+		UUID:        user.UUID,
+		TariffID:    user.TariffID,
+		Traffic:     traffic,
+		ExpiresAt:   expiry,
+		TrialEndsAt: user.TrialEndsAt,
+		HasAccess:   hasAccess,
 	}
 
 	utils.RespondWithJSON(w, http.StatusOK, resp)
@@ -227,33 +232,29 @@ func (h *UserHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx := h.Auth.UserRepo.DB.Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-		}
-	}()
-
 	user, err := h.Auth.UserRepo.FindByID(userID)
 	if err != nil {
-		tx.Rollback()
 		utils.RespondWithError(w, http.StatusNotFound, "User not found")
 		return
 	}
 
+	// Сначала удаляем из Xray конфига
 	if err := h.Xray.RemoveUserFromConfig(user.UUID); err != nil {
-		tx.Rollback()
+		log.Printf("[Xray] Error removing user from config: %v", err)
 		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to update Xray config")
 		return
 	}
 
+	// Перезапуск Xray после удаления пользователя
+	h.Xray.ScheduleRestart()
+
+	// Удаляем пользователя из базы данных
 	if err := h.Auth.UserRepo.Delete(userID); err != nil {
-		tx.Rollback()
+		log.Printf("[DB] Error deleting user: %v", err)
 		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to delete user")
 		return
 	}
 
-	tx.Commit()
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "account deleted"})
 }
 
@@ -285,7 +286,9 @@ func (h *UserHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Reques
 	expiresAt := time.Now().Add(1 * time.Hour)
 	_ = h.Auth.UserRepo.SetPasswordResetToken(data.Email, token, expiresAt)
 	_ = h.Auth.UserRepo.UpdatePasswordResetRequestedAt(data.Email, time.Now())
-	resetLink := fmt.Sprintf("https://your-frontend.com/reset-password?token=%s", token)
+	// Получаем URL фронтенда из конфигурации
+	cfg := config.Load()
+	resetLink := fmt.Sprintf("%s/reset-password?token=%s", cfg.FrontendURL, token)
 	if err := utils.SendResetEmail(user.Email, resetLink); err != nil {
 		log.Printf("[EMAIL] Ошибка отправки письма: %v", err)
 	}
@@ -307,11 +310,18 @@ func (h *UserHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		utils.RespondWithError(w, http.StatusBadRequest, "Invalid or expired token")
 		return
 	}
-	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(data.Password), bcrypt.DefaultCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(data.Password), bcrypt.DefaultCost)
+	if err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to hash password")
+		return
+	}
 	user.Password = string(hashedPassword)
 	user.PasswordResetToken = ""
 	user.PasswordResetExpiresAt = time.Time{}
-	h.Auth.UserRepo.DB.Save(user)
+	if err := h.Auth.UserRepo.DB.Save(user).Error; err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to update password")
+		return
+	}
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "password reset successful"})
 }
 
@@ -485,10 +495,17 @@ func (h *UserHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		utils.RespondWithError(w, http.StatusBadRequest, "Wrong old password")
 		return
 	}
-	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(data.NewPassword), bcrypt.DefaultCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(data.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to hash password")
+		return
+	}
 	user.Password = string(hashedPassword)
 	user.PasswordResetToken = ""
 	user.PasswordResetExpiresAt = time.Time{}
-	h.Auth.UserRepo.DB.Save(user)
+	if err := h.Auth.UserRepo.DB.Save(user).Error; err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to update password")
+		return
+	}
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "password changed"})
 }

@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:v2ray_client/features/auth/services/auth_service.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class TrafficPage extends StatefulWidget {
   const TrafficPage({super.key});
@@ -17,12 +20,34 @@ class _TrafficPageState extends State<TrafficPage> {
       _loading = true;
       _error = null;
     });
-    // TODO: Реализовать запрос к backend
-    await Future.delayed(const Duration(seconds: 1));
-    setState(() {
-      _traffic = 12345678; // Пример: 12 МБ
-      _loading = false;
-    });
+    try {
+      final token = await AuthService.getToken();
+      if (token == null) throw Exception('Нет токена');
+      final response = await http.get(
+        Uri.parse('http://193.124.182.210:8081/user/traffic'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        setState(() {
+          _traffic = data['traffic'] is int ? data['traffic'] : int.tryParse(data['traffic'].toString());
+          _loading = false;
+        });
+      } else {
+        setState(() {
+          _error = 'Ошибка: ${response.body}';
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
   }
 
   @override

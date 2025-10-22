@@ -8,10 +8,23 @@ import (
 )
 
 func SendResetEmail(to, link string) error {
-	smtpHost := os.Getenv("smtp.gmail.com")
-	smtpPort := os.Getenv("465")
-	smtpUser := os.Getenv("glebsapronov12@gmail.com")
-	smtpPass := os.Getenv("")
+	smtpHost := os.Getenv("SMTP_HOST")
+	if smtpHost == "" {
+		smtpHost = "smtp.gmail.com"
+	}
+	smtpPort := os.Getenv("SMTP_PORT")
+	if smtpPort == "" {
+		smtpPort = "587"
+	}
+	smtpUser := os.Getenv("SMTP_USER")
+	if smtpUser == "" {
+		smtpUser = "glebsapronov7@gmail.com"
+	}
+	smtpPass := os.Getenv("SMTP_PASS")
+	if smtpPass == "" {
+		// ВРЕМЕННО для тестов - замените на ваш App Password
+		smtpPass = "uwtr yrvp uicv fjtk"
+	}
 
 	from := smtpUser
 	subject := "Сброс пароля для вашего VPN-аккаунта"
@@ -31,4 +44,4 @@ func SendResetEmail(to, link string) error {
 	}
 	log.Printf("[EMAIL] Сброс пароля отправлен на %s", to)
 	return nil
-} 
+}

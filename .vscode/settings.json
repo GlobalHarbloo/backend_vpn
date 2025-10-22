@@ -1,5 +1,5 @@
 {
-    "cmake.sourceDirectory": "C:/Users/glebs/Desktop/vpn-backend/app_vpn/linux",
+    "cmake.sourceDirectory": "C:/Users/glebs/Desktop/vpn-backend/v2ray_client/linux/runner",
     "files.associations": {
         "array": "cpp",
         "tuple": "cpp",

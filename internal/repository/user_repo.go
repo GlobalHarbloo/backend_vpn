@@ -17,7 +17,7 @@ func NewUserRepository(db *gorm.DB) *UserRepository {
 }
 
 func (r *UserRepository) Delete(userID int) error {
-	result := r.DB.Delete(&models.User{}, userID)
+	result := r.DB.Unscoped().Delete(&models.User{}, userID)
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete user: %w", result.Error)
 	}
@@ -176,6 +176,17 @@ func (r *UserRepository) UpdatePaymentStatus(userID int, paymentID string, statu
 	result := r.DB.Model(&models.Payment{}).Where("id = ? AND user_id = ?", paymentID, userID).Update("status", status)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update payment status: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("payment not found")
+	}
+	return nil
+}
+
+func (r *UserRepository) UpdatePaymentProviderID(userID int, paymentID string, providerID string) error {
+	result := r.DB.Model(&models.Payment{}).Where("user_id = ? AND id = ?", userID, paymentID).Update("provider_id", providerID)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update payment provider id: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("payment not found")

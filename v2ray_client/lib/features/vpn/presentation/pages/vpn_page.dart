@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_v2ray/flutter_v2ray.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:v2ray_client/features/auth/services/auth_service.dart';
 
 class VpnPage extends StatefulWidget {
   const VpnPage({Key? key}) : super(key: key);
@@ -31,7 +32,7 @@ class _VpnPageState extends State<VpnPage> {
       "type": "none",
       "host": "",
       "path": "/openai",
-      "tls": ""
+      "tls": "",
     },
     'reality': {
       "v": "2",
@@ -49,8 +50,8 @@ class _VpnPageState extends State<VpnPage> {
       "fp": "",
       "alpn": "",
       "pbk": "OKwC9g9Skph_WdQyDu9izHZY37bOlU9pA-V4PzbUJWk",
-      "sid": "71fb02"
-    }
+      "sid": "71fb02",
+    },
   };
 
   @override
@@ -84,6 +85,47 @@ class _VpnPageState extends State<VpnPage> {
     }
   }
 
+  Future<String?> _getUserUuid() async {
+    String? uuid = await AuthService.getUuid();
+    if (uuid == null) {
+      try {
+        final profile = await AuthService.getProfile();
+        uuid = profile['uuid'];
+      } catch (e) {
+        setState(() {
+          _error =
+              'Ошибка получения профиля: '\n'${e.toString()}';
+          _isLoading = false;
+        });
+        return null;
+      }
+    }
+    return uuid;
+  }
+
+  Future<bool> _ensureAccessOrPrompt() async {
+    try {
+      final profile = await AuthService.getProfile();
+      final hasAccess = profile['has_access'] == true;
+      if (!hasAccess && mounted) {
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Нет доступа'),
+            content: const Text('Триал закончился или нет подписки. Перейдите во вкладку Платежи и оформите подписку.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+            ],
+          ),
+        );
+      }
+      return hasAccess;
+    } catch (e) {
+      setState(() { _error = e.toString(); });
+      return false;
+    }
+  }
+
   Future<void> _connect() async {
     setState(() {
       _isLoading = true;
@@ -93,6 +135,13 @@ class _VpnPageState extends State<VpnPage> {
       _ignoreStatusChange = false;
     });
     try {
+      // Проверка доступа
+      final allowed = await _ensureAccessOrPrompt();
+      if (!allowed) {
+        setState(() { _isLoading = false; _status = 'Отключено'; });
+        return;
+      }
+
       await _requestNotificationPermission();
       await _flutterV2ray.initializeV2Ray();
       final granted = await _flutterV2ray.requestPermission();
@@ -103,7 +152,10 @@ class _VpnPageState extends State<VpnPage> {
         });
         return;
       }
-      final config = _configs[_selectedConfig]!;
+      final config = Map<String, dynamic>.from(_configs[_selectedConfig]!);
+      final uuid = await _getUserUuid();
+      if (uuid == null) return;
+      config['id'] = uuid;
       _parser = FlutterV2ray.parseFromURL(_encodeVlessLink(config));
       setState(() {
         _error = null;
@@ -203,10 +255,16 @@ class _VpnPageState extends State<VpnPage> {
                   const Text('VLESS Reality'),
                 ],
               ),
-              Text('Статус: ${_statusText(_status)}', style: const TextStyle(fontSize: 20)),
+              Text(
+                'Статус: ${_statusText(_status)}',
+                style: const TextStyle(fontSize: 20),
+              ),
               if (_error != null) ...[
                 const SizedBox(height: 8),
-                Text('Ошибка: $_error', style: const TextStyle(color: Colors.red)),
+                Text(
+                  'Ошибка: $_error',
+                  style: const TextStyle(color: Colors.red),
+                ),
               ],
               const SizedBox(height: 32),
               ElevatedButton(
@@ -228,4 +286,4 @@ class _VpnPageState extends State<VpnPage> {
       ),
     );
   }
-} 
+}

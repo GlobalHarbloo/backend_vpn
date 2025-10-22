@@ -88,6 +88,8 @@ func main() {
 	// Public routes
 	r.HandleFunc("/register", userHandler.Register).Methods("POST")
 	r.HandleFunc("/login", userHandler.Login).Methods("POST")
+	// Webhook от ЮKassa (публичный)
+	r.HandleFunc("/payments/webhook", paymentHandler.YooKassaWebhookHandler()).Methods("POST")
 
 	// Путь к файлу подписки
 	subscriptionFilePath := "subscription.txt" // или относительный путь, если сервер запускается из этой папки
@@ -111,6 +113,8 @@ func main() {
 	userRouter.HandleFunc("/payments/{id}", paymentHandler.UpdatePaymentStatus).Methods("PUT")
 	userRouter.HandleFunc("/subscription", userHandler.GetSubscription).Methods("GET")
 	userRouter.HandleFunc("/hiddify-config", userHandler.GetHiddifyConfig).Methods("GET")
+	// Создание платежа ЮKassa (аутентифицированный)
+	userRouter.HandleFunc("/payments/yookassa", paymentHandler.CreateYooKassaPaymentHandler(cfg.YooKassaReturnURL, cfg.YooKassaShopID, cfg.YooKassaSecret)).Methods("POST")
 
 	// Xray config route
 	userRouter.HandleFunc("/config", handlers.NewConfigHandler(xrayService).GetConfig).Methods("GET")

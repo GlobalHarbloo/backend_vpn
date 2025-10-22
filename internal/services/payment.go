@@ -1,7 +1,11 @@
 package services
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 	"vpn-backend/internal/models"
 	"vpn-backend/internal/repository"
@@ -40,6 +44,21 @@ func (p *PaymentService) AttachXrayService(x *XrayService) {
 
 func (p *PaymentService) XrayService() *XrayService {
 	return p.Xray
+}
+
+func (p *PaymentService) HasAccess(user *models.User) bool {
+	if user.IsBanned {
+		return false
+	}
+	// Триал активен
+	if time.Now().Before(user.TrialEndsAt) {
+		return true
+	}
+	// Подписка активна
+	if user.TariffExpiresAt.After(time.Now()) {
+		return true
+	}
+	return false
 }
 
 func (p *PaymentService) ChangeTariff(userID int, tariffID int) error {
@@ -152,4 +171,97 @@ func (p *PaymentService) GetPaymentByID(userID int, paymentID string) (*models.P
 
 func (p *PaymentService) UpdatePaymentStatus(userID int, paymentID string, status string) error {
 	return p.UserRepo.UpdatePaymentStatus(userID, paymentID, status)
+}
+
+type yooCreatePaymentRequest struct {
+	Amount struct {
+		Value    string `json:"value"`
+		Currency string `json:"currency"`
+	} `json:"amount"`
+	Confirmation struct {
+		Type       string `json:"type"`
+		ReturnURL  string `json:"return_url"`
+	} `json:"confirmation"`
+	Capture      bool              `json:"capture"`
+	Description  string            `json:"description"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+}
+
+type yooCreatePaymentResponse struct {
+	ID           string `json:"id"`
+	Status       string `json:"status"`
+	Confirmation struct {
+		Type string `json:"type"`
+		URL  string `json:"confirmation_url"`
+	} `json:"confirmation"`
+}
+
+func (p *PaymentService) CreateYooKassaPayment(userID int, months int, returnURL string, shopID string, secret string, amountRub int, description string) (string, string, error) {
+	// Создать запись платежа (pending)
+	payment := &models.Payment{
+		UserID:        userID,
+		Amount:        amountRub,
+		TariffID:      0,
+		PaymentMethod: "yookassa",
+		Status:        "pending",
+		Provider:      "yookassa",
+		CreatedAt:     time.Now(),
+	}
+	if err := p.UserRepo.CreatePayment(payment); err != nil {
+		return "", "", fmt.Errorf("failed to create payment record: %w", err)
+	}
+
+	req := yooCreatePaymentRequest{}
+	req.Amount.Value = fmt.Sprintf("%d.00", amountRub)
+	req.Amount.Currency = "RUB"
+	req.Confirmation.Type = "redirect"
+	req.Confirmation.ReturnURL = returnURL
+	req.Capture = true
+	req.Description = description
+	req.Metadata = map[string]string{
+		"user_id": fmt.Sprintf("%d", userID),
+		"months":  fmt.Sprintf("%d", months),
+	}
+	body, _ := json.Marshal(req)
+
+	apiReq, _ := http.NewRequest("POST", "https://api.yookassa.ru/v3/payments", bytes.NewReader(body))
+	apiReq.Header.Set("Content-Type", "application/json")
+	// Idempotence-Key
+	apiReq.Header.Set("Idempotence-Key", fmt.Sprintf("%d-%d", userID, time.Now().UnixNano()))
+	basic := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", shopID, secret)))
+	apiReq.Header.Set("Authorization", "Basic "+basic)
+
+	resp, err := http.DefaultClient.Do(apiReq)
+	if err != nil {
+		return "", "", fmt.Errorf("yookassa request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", "", fmt.Errorf("yookassa returned status %d", resp.StatusCode)
+	}
+	var yres yooCreatePaymentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&yres); err != nil {
+		return "", "", fmt.Errorf("failed to decode yookassa response: %w", err)
+	}
+	// Обновить Payment.ProviderID
+	_ = p.UserRepo.UpdatePaymentProviderID(payment.UserID, fmt.Sprint(payment.ID), yres.ID)
+
+	return yres.Confirmation.URL, yres.ID, nil
+}
+
+// OnYooKassaWebhookSucceeded обновляет подписку пользователя на указанный период
+func (p *PaymentService) OnYooKassaWebhookSucceeded(userID int, months int) error {
+	user, err := p.UserRepo.FindByID(userID)
+	if err != nil {
+		return fmt.Errorf("user not found: %w", err)
+	}
+	base := time.Now()
+	if user.TariffExpiresAt.After(base) {
+		base = user.TariffExpiresAt
+	}
+	newExpiry := base.AddDate(0, months, 0)
+	if err := p.UserRepo.UpdateTariffExpiry(userID, newExpiry); err != nil {
+		return fmt.Errorf("failed to update tariff expiry: %w", err)
+	}
+	return nil
 }

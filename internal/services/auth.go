@@ -34,7 +34,8 @@ func (a *AuthService) Register(email, password, uuid string, tariffID int) (*mod
 		UUID:        uuid,
 		TariffID:    tariffID,
 		IsBanned:    false,
-		UsedTraffic: 0, // Явная инициализация
+		UsedTraffic: 0,
+		TrialEndsAt: time.Now().Add(72 * time.Hour),
 	}
 
 	if err := a.UserRepo.CreateUser(user); err != nil {

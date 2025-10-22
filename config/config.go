@@ -6,12 +6,16 @@ import (
 )
 
 type Config struct {
-	DbURL            string
-	ServerPort       string
-	JWTSecret        string
-	AdminToken       string
-	XrayConfigPath   string
-	XrayTemplatePath string
+	DbURL             string
+	ServerPort        string
+	JWTSecret         string
+	AdminToken        string
+	XrayConfigPath    string
+	XrayTemplatePath  string
+	YooKassaShopID    string
+	YooKassaSecret    string
+	YooKassaReturnURL string
+	FrontendURL       string
 }
 
 func Load() *Config {
@@ -21,14 +25,22 @@ func Load() *Config {
 	adminToken := getEnv("ADMIN_TOKEN", "admin-token")
 	xrayConfigPath := getEnv("XRAY_CONFIG_PATH", "/etc/xray/config.json")
 	xrayTemplatePath := getEnv("XRAY_TEMPLATE_PATH", "/etc/xray/config_template.json")
+	yooShopID := getEnv("YOOKASSA_SHOP_ID", "")
+	yooSecret := getEnv("YOOKASSA_SECRET", "")
+	yooReturnURL := getEnv("YOOKASSA_RETURN_URL", "")
+	frontendURL := getEnv("FRONTEND_URL", "https://your-frontend.com")
 
 	return &Config{
-		DbURL:            dbURL,
-		ServerPort:       serverPort,
-		JWTSecret:        jwtSecret,
-		AdminToken:       adminToken,
-		XrayConfigPath:   xrayConfigPath,
-		XrayTemplatePath: xrayTemplatePath,
+		DbURL:             dbURL,
+		ServerPort:        serverPort,
+		JWTSecret:         jwtSecret,
+		AdminToken:        adminToken,
+		XrayConfigPath:    xrayConfigPath,
+		XrayTemplatePath:  xrayTemplatePath,
+		YooKassaShopID:    yooShopID,
+		YooKassaSecret:    yooSecret,
+		YooKassaReturnURL: yooReturnURL,
+		FrontendURL:       frontendURL,
 	}
 }
 

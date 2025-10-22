@@ -26,6 +26,10 @@ class _MyAppState extends State<MyApp> {
 
   Future<void> _checkAuth() async {
     final loggedIn = await AuthService.isLoggedIn();
+    if (loggedIn) {
+      // Тихо обновим профиль, чтобы синхронизировать токен/uuid/has_access на старте
+      try { await AuthService.getProfile(); } catch (_) {}
+    }
     setState(() {
       _isLoggedIn = loggedIn;
       });

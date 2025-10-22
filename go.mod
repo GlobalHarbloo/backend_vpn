@@ -3,8 +3,16 @@ module github.com/yourusername/vpn-backend
 go 1.21
 
 require (
+	github.com/golang-jwt/jwt/v5 v5.2.0
+	github.com/google/uuid v1.6.0
+	github.com/gorilla/handlers v1.5.2
+	github.com/gorilla/mux v1.8.1
+	github.com/lib/pq v1.10.9
 	github.com/sagernet/sing-box v1.7.0
 	github.com/sagernet/sing v0.3.0
+	golang.org/x/crypto v0.17.0
+	gorm.io/driver/postgres v1.5.4
+	gorm.io/gorm v1.25.5
 )
 
 require (
@@ -30,7 +38,6 @@ require (
 	github.com/sagernet/sing-vmess v0.1.8 // indirect
 	github.com/sagernet/smux v0.0.0-20231208180855-7041f6ea79e7 // indirect
 	github.com/sagernet/utls v1.5.4 // indirect
-	github.com/sagernet/websocket v0.0.0-20220913015213-615516屿b1a // indirect
 	github.com/sagernet/wireguard-go v0.0.0-20231211153847-12269c276173 // indirect
 	github.com/scjalliance/comshim v0.0.0-20230315213746-5e51f40bd3b9 // indirect
 	github.com/u-root/uio v0.0.0-20230220225925-ffae2f7629be // indirect

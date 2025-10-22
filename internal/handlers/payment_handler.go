@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"vpn-backend/internal/middleware"
 	"vpn-backend/internal/services"
 	"vpn-backend/internal/utils"
@@ -104,4 +105,59 @@ func (h *PaymentHandler) UpdatePaymentStatus(w http.ResponseWriter, r *http.Requ
 	}
 
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "payment status updated"})
+}
+
+// CreateYooKassaPaymentHandler создаёт платёж и возвращает ссылку для оплаты
+func (h *PaymentHandler) CreateYooKassaPaymentHandler(cfgReturnURL, cfgShopID, cfgSecret string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := middleware.GetUserID(r)
+		if !ok {
+			utils.RespondWithError(w, http.StatusUnauthorized, "Unauthorized")
+			return
+		}
+		var data struct {
+			Months int `json:"months"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&data); err != nil || (data.Months != 1 && data.Months != 3) {
+			utils.RespondWithError(w, http.StatusBadRequest, "Invalid months")
+			return
+		}
+		amount := 200
+		if data.Months == 3 {
+			amount = 500
+		}
+		url, providerID, err := h.PaymentService.CreateYooKassaPayment(userID, data.Months, cfgReturnURL, cfgShopID, cfgSecret, amount, "VPN subscription")
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, "Failed to create payment")
+			return
+		}
+		utils.RespondWithJSON(w, http.StatusCreated, map[string]string{"confirmation_url": url, "provider_id": providerID})
+	}
+}
+
+// YooKassaWebhookHandler принимает вебхуки от ЮKassa
+func (h *PaymentHandler) YooKassaWebhookHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var event struct {
+			Event  string `json:"event"`
+			Object struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+				Metadata map[string]string `json:"metadata"`
+			} `json:"object"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, "Invalid body")
+			return
+		}
+		// Ожидаем, что метаданные содержат user_id и months (если настроим в будущем)
+		userIDStr := event.Object.Metadata["user_id"]
+		monthsStr := event.Object.Metadata["months"]
+		if event.Event == "payment.succeeded" && event.Object.Status == "succeeded" && userIDStr != "" && monthsStr != "" {
+			uid, _ := strconv.Atoi(userIDStr)
+			months, _ := strconv.Atoi(monthsStr)
+			_ = h.PaymentService.OnYooKassaWebhookSucceeded(uid, months)
+		}
+		w.WriteHeader(http.StatusOK)
+	}
 }

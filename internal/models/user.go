@@ -8,17 +8,18 @@ import (
 
 type User struct {
 	gorm.Model
-	Email           string    `gorm:"uniqueIndex" json:"email"`
-	Password        string    `json:"-"`                       // Никогда не отдаём в JSON
-	UUID            string    `gorm:"uniqueIndex" json:"uuid"` // UUID для Xray
-	TariffID        int       `json:"tariff_id"`               // ID тарифа
-	CreatedAt       time.Time `json:"created_at"`
-	IsBanned        bool      `json:"is_banned"`
-	TelegramID      int64     `json:"telegram_id"`
-	TariffExpiresAt time.Time `json:"tariff_expires_at"`
-	UsedTraffic     int64     `json:"used_traffic"`
-	PasswordResetToken     string    `json:"-"`
-	PasswordResetExpiresAt time.Time `json:"-"`
+	Email                    string    `gorm:"uniqueIndex" json:"email"`
+	Password                 string    `json:"-"`
+	UUID                     string    `gorm:"uniqueIndex" json:"uuid"`
+	TariffID                 int       `json:"tariff_id"`
+	CreatedAt                time.Time `json:"created_at"`
+	IsBanned                 bool      `json:"is_banned"`
+	TelegramID               int64     `json:"telegram_id"`
+	TariffExpiresAt          time.Time `json:"tariff_expires_at"`
+	UsedTraffic              int64     `json:"used_traffic"`
+	PasswordResetToken       string    `json:"-"`
+	PasswordResetExpiresAt   time.Time `json:"-"`
 	PasswordResetRequestedAt time.Time `json:"-"`
-	Tariff          Tariff    // Add Tariff relation
+	TrialEndsAt              time.Time `json:"trial_ends_at"`
+	Tariff                   Tariff
 }
