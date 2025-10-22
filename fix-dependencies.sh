@@ -12,6 +12,10 @@ if [ -f "go.sum" ]; then
     rm go.sum
 fi
 
+# Удаляем все sagernet зависимости из go.mod
+echo "Removing problematic sagernet dependencies..."
+sed -i '/sagernet/d' go.mod
+
 # Скачиваем все зависимости принудительно
 echo "Downloading dependencies..."
 go mod download -x
@@ -33,5 +37,20 @@ if [ $? -eq 0 ]; then
     echo "Executable created: ./vpn-backend"
 else
     echo "❌ Build failed!"
-    exit 1
+    echo "Trying alternative approach..."
+    
+    # Альтернативный подход - полная очистка
+    echo "Performing full cleanup..."
+    go clean -modcache
+    rm -f go.sum
+    go mod download
+    go mod tidy
+    go build -o vpn-backend ./cmd/server
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ Build successful after cleanup!"
+    else
+        echo "❌ Build still failed!"
+        exit 1
+    fi
 fi
