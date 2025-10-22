@@ -3,8 +3,8 @@ package services
 import (
 	"fmt"
 	"time"
-	"vpn-backend/internal/models"
-	"vpn-backend/internal/repository"
+	"github.com/yourusername/vpn-backend/internal/models"
+	"github.com/yourusername/vpn-backend/internal/repository"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"

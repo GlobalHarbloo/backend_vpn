@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-	"vpn-backend/internal/models"
-	"vpn-backend/internal/repository"
+	"github.com/yourusername/vpn-backend/internal/models"
+	"github.com/yourusername/vpn-backend/internal/repository"
 )
 
 type Payment struct {

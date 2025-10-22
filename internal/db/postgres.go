@@ -3,7 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"vpn-backend/config"
+	"github.com/yourusername/vpn-backend/config"
 
 	_ "github.com/lib/pq"
 )

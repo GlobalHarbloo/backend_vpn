@@ -2,9 +2,9 @@ package handlers
 
 import (
 	"net/http"
-	"vpn-backend/internal/middleware"
-	"vpn-backend/internal/services"
-	"vpn-backend/internal/utils"
+	"github.com/yourusername/vpn-backend/internal/middleware"
+	"github.com/yourusername/vpn-backend/internal/services"
+	"github.com/yourusername/vpn-backend/internal/utils"
 )
 
 type TrafficHandler struct {

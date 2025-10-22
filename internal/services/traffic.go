@@ -6,7 +6,7 @@ import (
 	"log"
 	"os/exec"
 	"time"
-	"vpn-backend/internal/repository"
+	"github.com/yourusername/vpn-backend/internal/repository"
 )
 
 type TrafficService struct {

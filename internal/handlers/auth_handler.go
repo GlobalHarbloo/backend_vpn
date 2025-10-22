@@ -3,8 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"vpn-backend/internal/services"
-	"vpn-backend/internal/utils"
+	"github.com/yourusername/vpn-backend/internal/services"
+	"github.com/yourusername/vpn-backend/internal/utils"
 
 	"github.com/google/uuid"
 )

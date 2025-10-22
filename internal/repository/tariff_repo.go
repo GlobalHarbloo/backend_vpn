@@ -2,7 +2,7 @@ package repository
 
 import (
 	"fmt"
-	"vpn-backend/internal/models"
+	"github.com/yourusername/vpn-backend/internal/models"
 
 	"gorm.io/gorm"
 )

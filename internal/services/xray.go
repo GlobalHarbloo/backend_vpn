@@ -10,8 +10,8 @@ import (
 	"sync"
 	"text/template"
 	"time"
-	"vpn-backend/internal/models"
-	"vpn-backend/internal/repository"
+	"github.com/yourusername/vpn-backend/internal/models"
+	"github.com/yourusername/vpn-backend/internal/repository"
 )
 
 type XrayService struct {

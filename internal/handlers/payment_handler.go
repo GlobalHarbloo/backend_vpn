@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"vpn-backend/internal/middleware"
-	"vpn-backend/internal/services"
-	"vpn-backend/internal/utils"
+	"github.com/yourusername/vpn-backend/internal/middleware"
+	"github.com/yourusername/vpn-backend/internal/services"
+	"github.com/yourusername/vpn-backend/internal/utils"
 
 	"github.com/gorilla/mux"
 )

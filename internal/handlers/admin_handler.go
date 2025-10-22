@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"vpn-backend/internal/repository"
-	"vpn-backend/internal/utils"
+	"github.com/yourusername/vpn-backend/internal/repository"
+	"github.com/yourusername/vpn-backend/internal/utils"
 
 	"github.com/gorilla/mux"
 )

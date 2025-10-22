@@ -3,7 +3,7 @@ package services
 import (
 	"encoding/json"
 	"testing"
-	"vpn-backend/internal/models"
+	"github.com/yourusername/vpn-backend/internal/models"
 )
 
 func TestGenerateUserConfig(t *testing.T) {
