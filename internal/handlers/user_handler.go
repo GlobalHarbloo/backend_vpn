@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"time"
+
 	"github.com/yourusername/vpn-backend/config"
 	"github.com/yourusername/vpn-backend/internal/middleware"
 	"github.com/yourusername/vpn-backend/internal/services"
@@ -55,7 +56,10 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	// Установить базовый тариф и трафик для нового пользователя
 	_ = h.Auth.UserRepo.UpdateUserTariff(int(user.ID), baseTariffID)
-	_ = h.Auth.UserRepo.UpdateUsedTraffic(int(user.ID), baseTraffic)
+	// Ensure used_traffic is non-null in DB: set to baseTraffic (10MB)
+	if err := h.Auth.UserRepo.UpdateUsedTraffic(int(user.ID), baseTraffic); err != nil {
+		log.Printf("[UserHandler] Failed to set initial used traffic for user %d: %v", int(user.ID), err)
+	}
 
 	// Добавление пользователя в конфигурацию Xray
 	if err := h.Xray.AddUserToConfig(user); err != nil {

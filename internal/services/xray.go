@@ -10,6 +10,7 @@ import (
 	"sync"
 	"text/template"
 	"time"
+
 	"github.com/yourusername/vpn-backend/internal/models"
 	"github.com/yourusername/vpn-backend/internal/repository"
 )
@@ -123,11 +124,11 @@ func (s *XrayService) saveConfig(config map[string]interface{}) error {
 // It is more robust than searching by protocol name (vless/vmess) because templates may vary.
 func (s *XrayService) findInboundWithClients(config map[string]interface{}) (map[string]interface{}, error) {
 	inboundsI, ok := config["inbounds"]
-	if !ok {
+	if !ok || inboundsI == nil {
 		return nil, fmt.Errorf("no inbounds in config")
 	}
 	inbounds, ok := inboundsI.([]interface{})
-	if !ok || len(inbounds) == 0 {
+	if !ok || inbounds == nil || len(inbounds) == 0 {
 		return nil, fmt.Errorf("no inbounds found in config")
 	}
 	for _, ib := range inbounds {
@@ -136,14 +137,14 @@ func (s *XrayService) findInboundWithClients(config map[string]interface{}) (map
 			continue
 		}
 		settingsI, ok := m["settings"]
-		if !ok {
+		if !ok || settingsI == nil {
 			continue
 		}
 		settings, ok := settingsI.(map[string]interface{})
-		if !ok {
+		if !ok || settings == nil {
 			continue
 		}
-		if clientsI, exists := settings["clients"]; exists {
+		if clientsI, exists := settings["clients"]; exists && clientsI != nil {
 			if _, ok := clientsI.([]interface{}); ok {
 				return m, nil
 			}
@@ -153,6 +154,7 @@ func (s *XrayService) findInboundWithClients(config map[string]interface{}) (map
 }
 
 func (s *XrayService) AddUserToConfig(user *models.User) error {
+	log.Printf("[Xray] AddUserToConfig called; configPath=%s, user=%s", s.ConfigPath, user.Email)
 	config, err := s.loadConfig()
 	if err != nil {
 		log.Printf("Error loading Xray config: %v", err)
@@ -161,9 +163,10 @@ func (s *XrayService) AddUserToConfig(user *models.User) error {
 
 	targetInbound, err := s.findInboundWithClients(config)
 	if err != nil {
-		log.Printf("Error finding inbound with clients: %v", err)
+		log.Printf("[Xray] Error finding inbound with clients: %v", err)
 		return fmt.Errorf("failed to find inbound with clients: %w", err)
 	}
+	log.Printf("[Xray] Found inbound for clients; protocol=%v port=%v", targetInbound["protocol"], targetInbound["port"])
 
 	settingsI, ok := targetInbound["settings"]
 	if !ok {
@@ -179,11 +182,12 @@ func (s *XrayService) AddUserToConfig(user *models.User) error {
 	} else {
 		clients = []interface{}{}
 	}
+	log.Printf("[Xray] clients before: %d", len(clients))
 
 	for _, client := range clients {
 		if cm, ok := client.(map[string]interface{}); ok {
 			if cm["id"] == user.UUID {
-				log.Printf("User with UUID %s already exists in Xray config", user.UUID)
+				log.Printf("[Xray] User with UUID %s already exists in Xray config", user.UUID)
 				return fmt.Errorf("user already exists in config")
 			}
 		}
@@ -199,9 +203,12 @@ func (s *XrayService) AddUserToConfig(user *models.User) error {
 	settings["clients"] = clients
 
 	if err := s.saveConfig(config); err != nil {
-		log.Printf("Error saving Xray config: %v", err)
+		log.Printf("[Xray] Error saving Xray config: %v", err)
 		return fmt.Errorf("failed to save Xray config: %w", err)
 	}
+
+	log.Printf("[Xray] clients after: %d", len(clients))
+	log.Printf("[Xray] SaveConfig OK; path=%s", s.ConfigPath)
 
 	return nil
 }

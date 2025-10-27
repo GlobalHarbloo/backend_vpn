@@ -59,6 +59,8 @@ func main() {
 	}
 
 	trafficService := services.NewTrafficService(userRepo, paymentService)
+	// Start background traffic sync from Xray
+	trafficService.StartBackgroundSync()
 	if trafficService == nil {
 		log.Fatalf("Failed to initialize TrafficService")
 	}
@@ -67,7 +69,7 @@ func main() {
 	paymentService.AttachXrayService(xrayService)
 
 	// Generate subscription file
-	err = handlers.GenerateSubscriptionFile("/root/xray/config.json", "subscription.txt")
+	err = handlers.GenerateSubscriptionFile(cfg.XrayConfigPath, "subscription.txt")
 	if err != nil {
 		log.Fatalf("Failed to generate subscription.txt: %v", err)
 	}
