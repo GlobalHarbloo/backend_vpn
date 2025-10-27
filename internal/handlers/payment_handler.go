@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+
 	"github.com/yourusername/vpn-backend/internal/middleware"
 	"github.com/yourusername/vpn-backend/internal/services"
 	"github.com/yourusername/vpn-backend/internal/utils"
@@ -141,8 +142,8 @@ func (h *PaymentHandler) YooKassaWebhookHandler() http.HandlerFunc {
 		var event struct {
 			Event  string `json:"event"`
 			Object struct {
-				ID     string `json:"id"`
-				Status string `json:"status"`
+				ID       string            `json:"id"`
+				Status   string            `json:"status"`
 				Metadata map[string]string `json:"metadata"`
 			} `json:"object"`
 		}

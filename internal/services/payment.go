@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
 	"github.com/yourusername/vpn-backend/internal/models"
 	"github.com/yourusername/vpn-backend/internal/repository"
 )
@@ -179,12 +180,12 @@ type yooCreatePaymentRequest struct {
 		Currency string `json:"currency"`
 	} `json:"amount"`
 	Confirmation struct {
-		Type       string `json:"type"`
-		ReturnURL  string `json:"return_url"`
+		Type      string `json:"type"`
+		ReturnURL string `json:"return_url"`
 	} `json:"confirmation"`
-	Capture      bool              `json:"capture"`
-	Description  string            `json:"description"`
-	Metadata     map[string]string `json:"metadata,omitempty"`
+	Capture     bool              `json:"capture"`
+	Description string            `json:"description"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 type yooCreatePaymentResponse struct {

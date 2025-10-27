@@ -119,6 +119,39 @@ func (s *XrayService) saveConfig(config map[string]interface{}) error {
 	return nil
 }
 
+// findInboundWithClients returns the first inbound entry that contains a settings.clients array.
+// It is more robust than searching by protocol name (vless/vmess) because templates may vary.
+func (s *XrayService) findInboundWithClients(config map[string]interface{}) (map[string]interface{}, error) {
+	inboundsI, ok := config["inbounds"]
+	if !ok {
+		return nil, fmt.Errorf("no inbounds in config")
+	}
+	inbounds, ok := inboundsI.([]interface{})
+	if !ok || len(inbounds) == 0 {
+		return nil, fmt.Errorf("no inbounds found in config")
+	}
+	for _, ib := range inbounds {
+		m, ok := ib.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		settingsI, ok := m["settings"]
+		if !ok {
+			continue
+		}
+		settings, ok := settingsI.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if clientsI, exists := settings["clients"]; exists {
+			if _, ok := clientsI.([]interface{}); ok {
+				return m, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("inbound with clients not found in config")
+}
+
 func (s *XrayService) AddUserToConfig(user *models.User) error {
 	config, err := s.loadConfig()
 	if err != nil {
@@ -126,26 +159,33 @@ func (s *XrayService) AddUserToConfig(user *models.User) error {
 		return fmt.Errorf("failed to load Xray config: %w", err)
 	}
 
-	inbounds := config["inbounds"].([]interface{})
-	var targetInbound map[string]interface{}
-	for _, ib := range inbounds {
-		m := ib.(map[string]interface{})
-		if proto, ok := m["protocol"].(string); ok && proto == "vless" {
-			targetInbound = m
-			break
-		}
-	}
-	if targetInbound == nil {
-		return fmt.Errorf("vless inbound not found in config")
+	targetInbound, err := s.findInboundWithClients(config)
+	if err != nil {
+		log.Printf("Error finding inbound with clients: %v", err)
+		return fmt.Errorf("failed to find inbound with clients: %w", err)
 	}
 
-	settings := targetInbound["settings"].(map[string]interface{})
-	clients := settings["clients"].([]interface{})
+	settingsI, ok := targetInbound["settings"]
+	if !ok {
+		settingsI = map[string]interface{}{"clients": []interface{}{}}
+		targetInbound["settings"] = settingsI
+	}
+	settings, _ := settingsI.(map[string]interface{})
+
+	clientsI, ok := settings["clients"]
+	var clients []interface{}
+	if ok {
+		clients, _ = clientsI.([]interface{})
+	} else {
+		clients = []interface{}{}
+	}
 
 	for _, client := range clients {
-		if client.(map[string]interface{})["id"] == user.UUID {
-			log.Printf("User with UUID %s already exists in Xray config", user.UUID)
-			return fmt.Errorf("user already exists in config")
+		if cm, ok := client.(map[string]interface{}); ok {
+			if cm["id"] == user.UUID {
+				log.Printf("User with UUID %s already exists in Xray config", user.UUID)
+				return fmt.Errorf("user already exists in config")
+			}
 		}
 	}
 
@@ -172,26 +212,21 @@ func (s *XrayService) RemoveUserFromConfig(userUUID string) error {
 		return err
 	}
 
-	inbounds := config["inbounds"].([]interface{})
-	var targetInbound map[string]interface{}
-	for _, ib := range inbounds {
-		m := ib.(map[string]interface{})
-		if proto, ok := m["protocol"].(string); ok && proto == "vless" {
-			targetInbound = m
-			break
-		}
-	}
-	if targetInbound == nil {
-		return fmt.Errorf("vless inbound not found in config")
+	targetInbound, err := s.findInboundWithClients(config)
+	if err != nil {
+		return err
 	}
 
-	settings := targetInbound["settings"].(map[string]interface{})
-	clients := settings["clients"].([]interface{})
+	settingsI, _ := targetInbound["settings"]
+	settings, _ := settingsI.(map[string]interface{})
+	clientsI, _ := settings["clients"].([]interface{})
 
 	newClients := []interface{}{}
-	for _, client := range clients {
-		if client.(map[string]interface{})["id"] != userUUID {
-			newClients = append(newClients, client)
+	for _, client := range clientsI {
+		if cm, ok := client.(map[string]interface{}); ok {
+			if cm["id"] != userUUID {
+				newClients = append(newClients, cm)
+			}
 		}
 	}
 	settings["clients"] = newClients
@@ -205,29 +240,25 @@ func (s *XrayService) UpdateUserTariff(userUUID string, level int) error {
 		return err
 	}
 
-	inbounds := config["inbounds"].([]interface{})
-	var targetInbound map[string]interface{}
-	for _, ib := range inbounds {
-		m := ib.(map[string]interface{})
-		if proto, ok := m["protocol"].(string); ok && proto == "vless" {
-			targetInbound = m
-			break
-		}
-	}
-	if targetInbound == nil {
-		return fmt.Errorf("vless inbound not found in config")
+	targetInbound, err := s.findInboundWithClients(config)
+	if err != nil {
+		return err
 	}
 
-	settings := targetInbound["settings"].(map[string]interface{})
-	clients := settings["clients"].([]interface{})
+	settingsI, _ := targetInbound["settings"]
+	settings, _ := settingsI.(map[string]interface{})
+	clientsI, _ := settings["clients"].([]interface{})
 
-	for _, client := range clients {
-		clientMap := client.(map[string]interface{})
-		if clientMap["id"] == userUUID {
-			clientMap["level"] = level
-			break
+	for i, client := range clientsI {
+		if cm, ok := client.(map[string]interface{}); ok {
+			if cm["id"] == userUUID {
+				cm["level"] = level
+				clientsI[i] = cm
+				break
+			}
 		}
 	}
+	settings["clients"] = clientsI
 
 	return s.saveConfig(config)
 }
@@ -284,31 +315,23 @@ func (s *XrayService) GetUserConfigFromFile(user *models.User) ([]byte, error) {
 		return nil, err
 	}
 
-	inbounds, ok := config["inbounds"].([]interface{})
-	if !ok || len(inbounds) == 0 {
-		return nil, fmt.Errorf("no inbounds found in config")
+	targetInbound, err := s.findInboundWithClients(config)
+	if err != nil {
+		return nil, err
 	}
-	var targetInbound map[string]interface{}
-	for _, ib := range inbounds {
-		m := ib.(map[string]interface{})
-		if proto, ok := m["protocol"].(string); ok && proto == "vless" {
-			targetInbound = m
-			break
-		}
-	}
-	if targetInbound == nil {
-		return nil, fmt.Errorf("vless inbound not found in config")
-	}
-	settings := targetInbound["settings"].(map[string]interface{})
-	clients := settings["clients"].([]interface{})
+
+	settingsI, _ := targetInbound["settings"]
+	settings, _ := settingsI.(map[string]interface{})
+	clientsI, _ := settings["clients"].([]interface{})
 
 	// Найти клиента по UUID
 	var userClient map[string]interface{}
-	for _, c := range clients {
-		client := c.(map[string]interface{})
-		if client["id"] == user.UUID {
-			userClient = client
-			break
+	for _, c := range clientsI {
+		if client, ok := c.(map[string]interface{}); ok {
+			if client["id"] == user.UUID {
+				userClient = client
+				break
+			}
 		}
 	}
 	if userClient == nil {
@@ -336,23 +359,18 @@ func (s *XrayService) CheckUserInConfig(userUUID string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	inbounds := config["inbounds"].([]interface{})
-	var targetInbound map[string]interface{}
-	for _, ib := range inbounds {
-		m := ib.(map[string]interface{})
-		if proto, ok := m["protocol"].(string); ok && proto == "vless" {
-			targetInbound = m
-			break
-		}
+	targetInbound, err := s.findInboundWithClients(config)
+	if err != nil {
+		return false, err
 	}
-	if targetInbound == nil {
-		return false, fmt.Errorf("vless inbound not found in config")
-	}
-	settings := targetInbound["settings"].(map[string]interface{})
-	clients := settings["clients"].([]interface{})
-	for _, client := range clients {
-		if client.(map[string]interface{})["id"] == userUUID {
-			return true, nil
+	settingsI, _ := targetInbound["settings"]
+	settings, _ := settingsI.(map[string]interface{})
+	clientsI, _ := settings["clients"].([]interface{})
+	for _, client := range clientsI {
+		if cm, ok := client.(map[string]interface{}); ok {
+			if cm["id"] == userUUID {
+				return true, nil
+			}
 		}
 	}
 	return false, nil

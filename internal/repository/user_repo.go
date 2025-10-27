@@ -3,6 +3,7 @@ package repository
 import (
 	"fmt"
 	"time"
+
 	"github.com/yourusername/vpn-backend/internal/models"
 
 	"gorm.io/gorm"
@@ -197,7 +198,7 @@ func (r *UserRepository) UpdatePaymentProviderID(userID int, paymentID string, p
 func (r *UserRepository) SetPasswordResetToken(email, token string, expiresAt time.Time) error {
 	return r.DB.Model(&models.User{}).Where("email = ?", email).
 		Updates(map[string]interface{}{
-			"password_reset_token": token,
+			"password_reset_token":      token,
 			"password_reset_expires_at": expiresAt,
 		}).Error
 }
