@@ -136,7 +136,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             CircleAvatar(
                               radius: 40,
                               backgroundColor: theme.colorScheme.primary
-                                  .withOpacity(0.1),
+                                  .withAlpha((0.1 * 255).round()),
                               child: const Icon(
                                 Icons.person,
                                 size: 48,
@@ -160,13 +160,17 @@ class _ProfilePageState extends State<ProfilePage> {
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Icon(
-                                  hasAccess ? Icons.check_circle : Icons.error_outline,
+                                  hasAccess
+                                      ? Icons.check_circle
+                                      : Icons.error_outline,
                                   size: 18,
                                   color: hasAccess ? Colors.green : Colors.red,
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
-                                  hasAccess ? 'Доступ активен' : 'Доступ отсутствует',
+                                  hasAccess
+                                      ? 'Доступ активен'
+                                      : 'Доступ отсутствует',
                                   style: theme.textTheme.bodyMedium,
                                 ),
                               ],
@@ -315,7 +319,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Text(
-                                          'Ошибка удаления: \\${e.toString()}',
+                                          'Ошибка удаления: ${e.toString()}',
                                         ),
                                       ),
                                     );

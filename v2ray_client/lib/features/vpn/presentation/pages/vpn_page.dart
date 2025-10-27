@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_v2ray/flutter_v2ray.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:v2ray_client/features/auth/services/auth_service.dart';
@@ -66,7 +67,7 @@ class _VpnPageState extends State<VpnPage> {
           _isConnected = isInstance;
           _isLoading = false;
         });
-        print('[VPN] Status changed: \\${status.toString()}');
+        debugPrint('[VPN] Status changed: ${status.toString()}');
       },
     );
   }
@@ -93,8 +94,7 @@ class _VpnPageState extends State<VpnPage> {
         uuid = profile['uuid'];
       } catch (e) {
         setState(() {
-          _error =
-              'Ошибка получения профиля: '\n'${e.toString()}';
+          _error = 'Ошибка получения профиля:\n${e.toString()}';
           _isLoading = false;
         });
         return null;
@@ -112,16 +112,23 @@ class _VpnPageState extends State<VpnPage> {
           context: context,
           builder: (ctx) => AlertDialog(
             title: const Text('Нет доступа'),
-            content: const Text('Триал закончился или нет подписки. Перейдите во вкладку Платежи и оформите подписку.'),
+            content: const Text(
+              'Триал закончился или нет подписки. Перейдите во вкладку Платежи и оформите подписку.',
+            ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('OK'),
+              ),
             ],
           ),
         );
       }
       return hasAccess;
     } catch (e) {
-      setState(() { _error = e.toString(); });
+      setState(() {
+        _error = e.toString();
+      });
       return false;
     }
   }
@@ -138,7 +145,10 @@ class _VpnPageState extends State<VpnPage> {
       // Проверка доступа
       final allowed = await _ensureAccessOrPrompt();
       if (!allowed) {
-        setState(() { _isLoading = false; _status = 'Отключено'; });
+        setState(() {
+          _isLoading = false;
+          _status = 'Отключено';
+        });
         return;
       }
 
@@ -187,7 +197,7 @@ class _VpnPageState extends State<VpnPage> {
     });
     try {
       await _flutterV2ray.stopV2Ray();
-      print('[VPN] stopV2Ray called');
+      debugPrint('[VPN] stopV2Ray called');
       setState(() {
         _isLoading = false;
       });

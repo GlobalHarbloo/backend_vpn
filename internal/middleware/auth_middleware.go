@@ -23,8 +23,16 @@ func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Удаляем "Bearer " из заголовка
-			tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
+			// Извлечём токен из заголовка Authorization.
+			// Поддерживаем формат: "Bearer <token>" (регистронезависимо) или просто сам токен.
+			var tokenString string
+			parts := strings.Fields(authHeader)
+			if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+				tokenString = parts[1]
+			} else {
+				// Если формат другой — используем весь заголовок как токен (fallback)
+				tokenString = strings.TrimSpace(authHeader)
+			}
 
 			// Парсим токен
 			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {

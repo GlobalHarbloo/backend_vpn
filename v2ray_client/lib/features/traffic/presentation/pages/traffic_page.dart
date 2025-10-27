@@ -33,7 +33,10 @@ class _TrafficPageState extends State<TrafficPage> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         setState(() {
-          _traffic = data['traffic'] is int ? data['traffic'] : int.tryParse(data['traffic'].toString());
+          // Server returns traffic_bytes and traffic_human
+          _traffic = data['traffic_bytes'] is int
+              ? data['traffic_bytes']
+              : int.tryParse(data['traffic_bytes']?.toString() ?? '0');
           _loading = false;
         });
       } else {
@@ -64,19 +67,21 @@ class _TrafficPageState extends State<TrafficPage> {
         child: _loading
             ? const CircularProgressIndicator()
             : _error != null
-                ? Text('Ошибка: $_error', style: const TextStyle(color: Colors.red))
-                : Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text('Трафик: ${_traffic != null ? (_traffic! / (1024 * 1024)).toStringAsFixed(2) : '-'} МБ'),
-                      const SizedBox(height: 24),
-                      ElevatedButton(
-                        onPressed: _loadTraffic,
-                        child: const Text('Обновить'),
-                      ),
-                    ],
+            ? Text('Ошибка: $_error', style: const TextStyle(color: Colors.red))
+            : Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'Трафик: ${_traffic != null ? (_traffic! / (1024 * 1024)).toStringAsFixed(2) : '-'} МБ',
                   ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: _loadTraffic,
+                    child: const Text('Обновить'),
+                  ),
+                ],
+              ),
       ),
     );
   }
-} 
+}
