@@ -91,6 +91,8 @@ func main() {
 	// Public routes
 	r.HandleFunc("/register", userHandler.Register).Methods("POST")
 	r.HandleFunc("/login", userHandler.Login).Methods("POST")
+	// Refresh access token using refresh token
+	r.HandleFunc("/refresh", userHandler.RefreshToken).Methods("POST")
 	// Webhook от ЮKassa (публичный)
 	r.HandleFunc("/payments/webhook", paymentHandler.YooKassaWebhookHandler()).Methods("POST")
 
@@ -116,6 +118,8 @@ func main() {
 	userRouter.HandleFunc("/payments/{id}", paymentHandler.UpdatePaymentStatus).Methods("PUT")
 	userRouter.HandleFunc("/subscription", userHandler.GetSubscription).Methods("GET")
 	userRouter.HandleFunc("/hiddify-config", userHandler.GetHiddifyConfig).Methods("GET")
+	// Logout - invalidate refresh token on server
+	userRouter.HandleFunc("/logout", userHandler.Logout).Methods("POST")
 	// Создание платежа ЮKassa (аутентифицированный)
 	userRouter.HandleFunc("/payments/yookassa", paymentHandler.CreateYooKassaPaymentHandler(cfg.YooKassaReturnURL, cfg.YooKassaShopID, cfg.YooKassaSecret)).Methods("POST")
 

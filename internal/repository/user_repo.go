@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -203,11 +205,45 @@ func (r *UserRepository) SetPasswordResetToken(email, token string, expiresAt ti
 		}).Error
 }
 
+func (r *UserRepository) SetRefreshToken(userID int, tokenHash string, expiresAt time.Time) error {
+	return r.DB.Model(&models.User{}).Where("id = ?", userID).
+		Updates(map[string]interface{}{
+			"refresh_token_hash":       tokenHash,
+			"refresh_token_expires_at": expiresAt,
+		}).Error
+}
+
+func (r *UserRepository) ClearRefreshToken(userID int) error {
+	return r.DB.Model(&models.User{}).Where("id = ?", userID).
+		Updates(map[string]interface{}{
+			"refresh_token_hash":       "",
+			"refresh_token_expires_at": time.Time{},
+		}).Error
+}
+
+func (r *UserRepository) FindByRefreshToken(token string) (*models.User, error) {
+	var user models.User
+	// We store only the SHA256 hex of the refresh token. Compute and lookup.
+	h := sha256.Sum256([]byte(token))
+	hashed := hex.EncodeToString(h[:])
+	if err := r.DB.Where("refresh_token_hash = ? AND refresh_token_expires_at > ?", hashed, time.Now()).First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
 func (r *UserRepository) FindByPasswordResetToken(token string) (*models.User, error) {
 	var user models.User
-	result := r.DB.Where("password_reset_token = ? AND password_reset_expires_at > ?", token, time.Now()).First(&user)
-	if result.Error != nil {
-		return nil, fmt.Errorf("invalid or expired token")
+	// First try exact match (to allow a short migration window for existing plain tokens)
+	if err := r.DB.Where("password_reset_token = ? AND password_reset_expires_at > ?", token, time.Now()).First(&user).Error; err == nil {
+		return &user, nil
+	}
+
+	// Otherwise, assume token was sent plain and we store SHA256 hex in DB — try hashed lookup
+	h := sha256.Sum256([]byte(token))
+	hashed := hex.EncodeToString(h[:])
+	if err := r.DB.Where("password_reset_token = ? AND password_reset_expires_at > ?", hashed, time.Now()).First(&user).Error; err != nil {
+		return nil, err
 	}
 	return &user, nil
 }

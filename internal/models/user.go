@@ -21,5 +21,8 @@ type User struct {
 	PasswordResetExpiresAt   time.Time `json:"-"`
 	PasswordResetRequestedAt time.Time `json:"-"`
 	TrialEndsAt              time.Time `json:"trial_ends_at"`
-	Tariff                   Tariff
+	// Refresh token hash (SHA256 hex) for issued refresh token
+	RefreshTokenHash      string    `json:"-"`
+	RefreshTokenExpiresAt time.Time `json:"-"`
+	Tariff                Tariff
 }

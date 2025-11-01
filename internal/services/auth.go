@@ -1,8 +1,12 @@
 package services
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
+
 	"github.com/yourusername/vpn-backend/internal/models"
 	"github.com/yourusername/vpn-backend/internal/repository"
 
@@ -45,26 +49,29 @@ func (a *AuthService) Register(email, password, uuid string, tariffID int) (*mod
 	return user, nil
 }
 
-func (a *AuthService) AuthenticateUser(email, password string) (string, error) {
+// AuthenticateUser authenticates credentials and returns access and refresh tokens.
+func (a *AuthService) AuthenticateUser(email, password string) (string, string, error) {
 	user, err := a.UserRepo.GetUserByEmail(email)
 	if err != nil {
-		return "", fmt.Errorf("invalid credentials")
+		return "", "", fmt.Errorf("invalid credentials")
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
-		return "", fmt.Errorf("invalid credentials")
+		return "", "", fmt.Errorf("invalid credentials")
 	}
 
-	token, err := a.GenerateJWT(int(user.ID))
+	// Create both access and refresh tokens
+	access, refresh, err := a.CreateTokens(int(user.ID))
 	if err != nil {
-		return "", fmt.Errorf("failed to generate token: %w", err)
+		return "", "", fmt.Errorf("failed to create tokens: %w", err)
 	}
-
-	return token, nil
+	return access, refresh, nil
 }
 
 func (a *AuthService) GenerateJWT(userID int) (string, error) {
-	expirationTime := time.Now().Add(24 * time.Hour)
+	// Increase JWT lifetime to 7 days to avoid frequent forced re-login from mobile clients.
+	// Consider implementing refresh tokens for a more secure long-lived session model.
+	expirationTime := time.Now().Add(7 * 24 * time.Hour)
 	claims := &jwt.MapClaims{
 		"user_id": userID,
 		"exp":     expirationTime.Unix(),
@@ -77,6 +84,31 @@ func (a *AuthService) GenerateJWT(userID int) (string, error) {
 	}
 
 	return tokenString, nil
+}
+
+// CreateTokens generates an access JWT and a refresh token, stores the hashed refresh token in DB.
+func (a *AuthService) CreateTokens(userID int) (accessToken string, refreshToken string, err error) {
+	accessToken, err = a.GenerateJWT(userID)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Generate secure random refresh token (64 hex chars -> 32 bytes)
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", fmt.Errorf("failed to generate refresh token: %w", err)
+	}
+	refreshToken = hex.EncodeToString(b)
+
+	// Hash and store
+	h := sha256.Sum256([]byte(refreshToken))
+	hashed := hex.EncodeToString(h[:])
+	expiresAt := time.Now().AddDate(0, 1, 0) // refresh token valid 1 month
+	if err := a.UserRepo.SetRefreshToken(userID, hashed, expiresAt); err != nil {
+		return "", "", fmt.Errorf("failed to store refresh token: %w", err)
+	}
+
+	return accessToken, refreshToken, nil
 }
 
 func ParseJWT(tokenString string, jwtSecret string) (int, error) {
@@ -102,15 +134,14 @@ func ParseJWT(tokenString string, jwtSecret string) (int, error) {
 	return userID, nil
 }
 
-func (a *AuthService) AuthenticateByTelegramID(telegramID int64) (string, error) {
+func (a *AuthService) AuthenticateByTelegramID(telegramID int64) (string, string, error) {
 	user, err := a.UserRepo.GetUserByTelegramID(telegramID)
 	if err != nil {
-		return "", fmt.Errorf("invalid credentials")
+		return "", "", fmt.Errorf("invalid credentials")
 	}
-	token, err := a.GenerateJWT(int(user.ID))
+	access, refresh, err := a.CreateTokens(int(user.ID))
 	if err != nil {
-		return "", fmt.Errorf("failed to generate token: %w", err)
+		return "", "", fmt.Errorf("failed to create tokens: %w", err)
 	}
-
-	return token, nil
+	return access, refresh, nil
 }

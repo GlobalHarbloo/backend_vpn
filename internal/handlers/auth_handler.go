@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+
 	"github.com/yourusername/vpn-backend/internal/services"
 	"github.com/yourusername/vpn-backend/internal/utils"
 
@@ -37,7 +38,14 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.RespondWithJSON(w, http.StatusCreated, user)
+	// Create tokens for the new user
+	access, refresh, err := h.Auth.CreateTokens(int(user.ID))
+	if err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "failed to create tokens")
+		return
+	}
+
+	utils.RespondWithJSON(w, http.StatusCreated, map[string]interface{}{"token": access, "access_token": access, "refresh_token": refresh, "user": user})
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -52,13 +60,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var token string
+	var access, refresh string
 	var err error
 
 	if data.TelegramID != 0 {
-		token, err = h.Auth.AuthenticateByTelegramID(data.TelegramID)
+		access, refresh, err = h.Auth.AuthenticateByTelegramID(data.TelegramID)
 	} else {
-		token, err = h.Auth.AuthenticateUser(data.Email, data.Password)
+		access, refresh, err = h.Auth.AuthenticateUser(data.Email, data.Password)
 	}
 
 	if err != nil {
@@ -66,5 +74,5 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"token": token})
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"token": access, "access_token": access, "refresh_token": refresh})
 }

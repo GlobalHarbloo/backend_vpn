@@ -1,14 +1,17 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/big"
 	"net/http"
+	"strings"
 	"time"
 
-	"github.com/yourusername/vpn-backend/config"
 	"github.com/yourusername/vpn-backend/internal/middleware"
 	"github.com/yourusername/vpn-backend/internal/services"
 	"github.com/yourusername/vpn-backend/internal/utils"
@@ -82,16 +85,18 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	// Перезапуск Xray
 	h.Xray.ScheduleRestart()
 
-	// Автоматический вход: выдаем JWT токен сразу после успешной регистрации
-	token, err := h.Auth.GenerateJWT(int(user.ID))
+	// Автоматический вход: выдаем access и refresh токены сразу после успешной регистрации
+	access, refresh, err := h.Auth.CreateTokens(int(user.ID))
 	if err != nil {
-		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to generate token")
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to generate tokens")
 		return
 	}
 
 	utils.RespondWithJSON(w, http.StatusCreated, map[string]interface{}{
-		"token": token,
-		"user":  user,
+		"token":         access,
+		"access_token":  access,
+		"refresh_token": refresh,
+		"user":          user,
 	})
 }
 
@@ -107,13 +112,13 @@ func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var token string
+	var access, refresh string
 	var err error
 
 	if data.TelegramID != 0 {
-		token, err = h.Auth.AuthenticateByTelegramID(data.TelegramID)
+		access, refresh, err = h.Auth.AuthenticateByTelegramID(data.TelegramID)
 	} else {
-		token, err = h.Auth.AuthenticateUser(data.Email, data.Password)
+		access, refresh, err = h.Auth.AuthenticateUser(data.Email, data.Password)
 	}
 
 	if err != nil {
@@ -121,7 +126,7 @@ func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"token": token})
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"token": access, "access_token": access, "refresh_token": refresh})
 }
 
 func (h *UserHandler) ChangeTariff(w http.ResponseWriter, r *http.Request) {
@@ -206,23 +211,33 @@ func (h *UserHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 
 	hasAccess := h.Payment.HasAccess(user)
 
+	// Use pointer times so zero value is marshalled as null instead of 0001-01-01
+	var expiryPtr *time.Time
+	if !expiry.IsZero() {
+		expiryPtr = &expiry
+	}
+	var trialPtr *time.Time
+	if !user.TrialEndsAt.IsZero() {
+		trialPtr = &user.TrialEndsAt
+	}
+
 	resp := struct {
-		ID          int       `json:"id"`
-		Email       string    `json:"email"`
-		UUID        string    `json:"uuid"`
-		TariffID    int       `json:"tariff_id"`
-		Traffic     int64     `json:"traffic"`
-		ExpiresAt   time.Time `json:"expires_at"`
-		TrialEndsAt time.Time `json:"trial_ends_at"`
-		HasAccess   bool      `json:"has_access"`
+		ID          int        `json:"id"`
+		Email       string     `json:"email"`
+		UUID        string     `json:"uuid"`
+		TariffID    int        `json:"tariff_id"`
+		Traffic     int64      `json:"traffic"`
+		ExpiresAt   *time.Time `json:"expires_at"`
+		TrialEndsAt *time.Time `json:"trial_ends_at"`
+		HasAccess   bool       `json:"has_access"`
 	}{
 		ID:          int(user.ID),
 		Email:       user.Email,
 		UUID:        user.UUID,
 		TariffID:    user.TariffID,
 		Traffic:     traffic,
-		ExpiresAt:   expiry,
-		TrialEndsAt: user.TrialEndsAt,
+		ExpiresAt:   expiryPtr,
+		TrialEndsAt: trialPtr,
 		HasAccess:   hasAccess,
 	}
 
@@ -286,30 +301,39 @@ func (h *UserHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Reques
 		utils.RespondWithError(w, http.StatusTooManyRequests, "Слишком много запросов на сброс пароля. Попробуйте позже.")
 		return
 	}
-	token := uuid.New().String()
-	expiresAt := time.Now().Add(1 * time.Hour)
-	_ = h.Auth.UserRepo.SetPasswordResetToken(data.Email, token, expiresAt)
-	_ = h.Auth.UserRepo.UpdatePasswordResetRequestedAt(data.Email, time.Now())
-	// Получаем URL фронтенда из конфигурации
-	cfg := config.Load()
-	resetLink := fmt.Sprintf("%s/reset-password?token=%s", cfg.FrontendURL, token)
-	if err := utils.SendResetEmail(user.Email, resetLink); err != nil {
-		log.Printf("[EMAIL] Ошибка отправки письма: %v", err)
+	// Generate a numeric code (6 digits), store SHA256(hash) in DB, and email the code.
+	code, err := generateNumericCode(6)
+	if err != nil {
+		log.Printf("[RESET] failed to generate code: %v", err)
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to generate reset code")
+		return
 	}
-	log.Printf("[RESET] Сброс пароля отправлен на %s", user.Email)
-	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "If email exists, reset link sent"})
+	expiresAt := time.Now().Add(15 * time.Minute)
+	hashed := fmt.Sprintf("%x", sha256.Sum256([]byte(code)))
+	if err := h.Auth.UserRepo.SetPasswordResetToken(data.Email, hashed, expiresAt); err != nil {
+		log.Printf("[RESET] failed to store reset token: %v", err)
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to generate reset code")
+		return
+	}
+	_ = h.Auth.UserRepo.UpdatePasswordResetRequestedAt(data.Email, time.Now())
+	// Send numeric code via email
+	if err := utils.SendResetCodeEmail(user.Email, code, expiresAt); err != nil {
+		log.Printf("[EMAIL] Ошибка отправки кода: %v", err)
+	}
+	log.Printf("[RESET] Код сброса пароля отправлен на %s", user.Email)
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "If email exists, reset code sent"})
 }
 
 func (h *UserHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	var data struct {
-		Token    string `json:"token"`
+		Code     string `json:"code"`
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		utils.RespondWithError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	user, err := h.Auth.UserRepo.FindByPasswordResetToken(data.Token)
+	user, err := h.Auth.UserRepo.FindByPasswordResetToken(data.Code)
 	if err != nil {
 		utils.RespondWithError(w, http.StatusBadRequest, "Invalid or expired token")
 		return
@@ -327,6 +351,23 @@ func (h *UserHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "password reset successful"})
+}
+
+// generateNumericCode generates a cryptographically secure numeric code with n digits.
+func generateNumericCode(n int) (string, error) {
+	if n <= 0 {
+		return "", fmt.Errorf("invalid code length")
+	}
+	max := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(n)), nil) // 10^n
+	num, err := rand.Int(rand.Reader, max)
+	if err != nil {
+		return "", err
+	}
+	s := num.Text(10)
+	if len(s) < n {
+		s = strings.Repeat("0", n-len(s)) + s
+	}
+	return s, nil
 }
 
 func (h *UserHandler) CheckToken(w http.ResponseWriter, r *http.Request) {
@@ -512,4 +553,47 @@ func (h *UserHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "password changed"})
+}
+
+// RefreshToken accepts a refresh token and returns new access and refresh tokens (rotates refresh token).
+func (h *UserHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
+	var data struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		utils.RespondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if data.RefreshToken == "" {
+		utils.RespondWithError(w, http.StatusBadRequest, "refresh_token required")
+		return
+	}
+
+	user, err := h.Auth.UserRepo.FindByRefreshToken(data.RefreshToken)
+	if err != nil {
+		utils.RespondWithError(w, http.StatusUnauthorized, "Invalid refresh token")
+		return
+	}
+
+	access, refresh, err := h.Auth.CreateTokens(int(user.ID))
+	if err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to create tokens")
+		return
+	}
+
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"access_token": access, "refresh_token": refresh})
+}
+
+// Logout clears server-side refresh token for the authenticated user.
+func (h *UserHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r)
+	if !ok {
+		utils.RespondWithError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	if err := h.Auth.UserRepo.ClearRefreshToken(userID); err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to logout")
+		return
+	}
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
 }
