@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/yourusername/vpn-backend/internal/middleware"
 	"github.com/yourusername/vpn-backend/internal/services"
@@ -145,6 +146,9 @@ func (h *PaymentHandler) YooKassaWebhookHandler() http.HandlerFunc {
 				ID       string            `json:"id"`
 				Status   string            `json:"status"`
 				Metadata map[string]string `json:"metadata"`
+				Amount   struct {
+					Value string `json:"value"`
+				} `json:"amount"`
 			} `json:"object"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
@@ -157,7 +161,18 @@ func (h *PaymentHandler) YooKassaWebhookHandler() http.HandlerFunc {
 		if event.Event == "payment.succeeded" && event.Object.Status == "succeeded" && userIDStr != "" && monthsStr != "" {
 			uid, _ := strconv.Atoi(userIDStr)
 			months, _ := strconv.Atoi(monthsStr)
-			_ = h.PaymentService.OnYooKassaWebhookSucceeded(uid, months)
+			providerID := event.Object.ID
+			// try to parse amount if available (Amount.Value is already a string)
+			amount := 0
+			val := event.Object.Amount.Value
+			if val != "" {
+				// value like "200.00" — parse integer rubles (take part before dot)
+				parts := strings.SplitN(val, ".", 2)
+				if iv, err := strconv.Atoi(parts[0]); err == nil {
+					amount = iv
+				}
+			}
+			_ = h.PaymentService.OnYooKassaWebhookSucceeded(uid, months, providerID, amount)
 		}
 		w.WriteHeader(http.StatusOK)
 	}

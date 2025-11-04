@@ -243,7 +243,7 @@ func (p *PaymentService) CreateYooKassaPayment(userID int, months int, returnURL
 }
 
 // OnYooKassaWebhookSucceeded обновляет подписку пользователя на указанный период
-func (p *PaymentService) OnYooKassaWebhookSucceeded(userID int, months int) error {
+func (p *PaymentService) OnYooKassaWebhookSucceeded(userID int, months int, providerID string, amount int) error {
 	user, err := p.UserRepo.FindByID(userID)
 	if err != nil {
 		return fmt.Errorf("user not found: %w", err)
@@ -256,5 +256,22 @@ func (p *PaymentService) OnYooKassaWebhookSucceeded(userID int, months int) erro
 	if err := p.UserRepo.UpdateTariffExpiry(userID, newExpiry); err != nil {
 		return fmt.Errorf("failed to update tariff expiry: %w", err)
 	}
+
+	// Send notifications: to user (if linked) and to admins via bot (if available)
+	// We reference botService and sendToAdmins which live in the same package `services`.
+	if botService != nil {
+		// Notify user in their Telegram chat if telegram_id is set
+		if user.TelegramID != 0 {
+			receipt := fmt.Sprintf("Платёж подтверждён. Сумма: %d ₽. Период: %d мес. Провайдер ID: %s. Подписка продлена до: %s",
+				amount, months, providerID, newExpiry.Format("2006-01-02 15:04:05"))
+			sendMessage(user.TelegramID, receipt)
+		}
+
+		// Notify admins
+		adminMsg := fmt.Sprintf("Платёж успешно завершён пользователем %s (id=%d). Сумма: %d ₽. Месяцев: %d. ProviderID: %s. Подписка до: %s",
+			user.Email, user.ID, amount, months, providerID, newExpiry.Format("2006-01-02 15:04:05"))
+		sendToAdmins(adminMsg)
+	}
+
 	return nil
 }

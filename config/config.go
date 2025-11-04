@@ -18,6 +18,8 @@ type Config struct {
 	YooKassaSecret      string
 	YooKassaReturnURL   string
 	FrontendURL         string
+	AdminChatIDs        string // comma-separated telegram chat IDs for admin notifications
+	PublicOfferURL      string // URL to the public offer/terms
 }
 
 func Load() *Config {
@@ -33,6 +35,8 @@ func Load() *Config {
 	frontendURL := getEnv("FRONTEND_URL", "https://your-frontend.com")
 	telegramBot := getEnv("TELEGRAM_BOT_USERNAME", "")
 	telegramToken := getEnv("TELEGRAM_BOT_TOKEN", "")
+	adminChatIDs := getEnv("ADMIN_CHAT_IDS", "")
+	publicOffer := getEnv("PUBLIC_OFFER_URL", "")
 
 	return &Config{
 		DbURL:               dbURL,
@@ -47,6 +51,8 @@ func Load() *Config {
 		YooKassaSecret:      yooSecret,
 		YooKassaReturnURL:   yooReturnURL,
 		FrontendURL:         frontendURL,
+		AdminChatIDs:        adminChatIDs,
+		PublicOfferURL:      publicOffer,
 	}
 }
 

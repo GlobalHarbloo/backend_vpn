@@ -96,7 +96,16 @@ class AuthService {
     );
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
-      return data['link'];
+      // Server returns both 'link' (https) and 'tg_link' (tg://). Prefer tg:// to open native app.
+      if (data is Map<String, dynamic>) {
+        if (data['tg_link'] != null && (data['tg_link'] as String).isNotEmpty) {
+          return data['tg_link'];
+        }
+        if (data['link'] != null && (data['link'] as String).isNotEmpty) {
+          return data['link'];
+        }
+      }
+      throw Exception('Invalid response from server');
     }
     try {
       final data = jsonDecode(response.body);

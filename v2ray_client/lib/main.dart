@@ -47,7 +47,7 @@ class _MyAppState extends State<MyApp> {
       );
     }
     return MaterialApp(
-      title: 'VPN Client',
+      title: 'Fresh vpn',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),

@@ -104,7 +104,7 @@ class _ProfilePageState extends State<ProfilePage> {
             ? const CircularProgressIndicator()
             : _error != null
             ? Text('Ошибка: $_error', style: const TextStyle(color: Colors.red))
-            : Padding(
+            : SingleChildScrollView(
                 padding: const EdgeInsets.all(24),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -145,7 +145,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                     }
                                   }
                                 },
-                                child: const Text('Оплатить'),
+                                child: const Text('Приобрести лицензию'),
                               ),
                             ],
                           ),
@@ -158,8 +158,16 @@ class _ProfilePageState extends State<ProfilePage> {
                       padding: const EdgeInsets.only(bottom: 16.0),
                       child: InkWell(
                         onTap: () async {
-                          const telegramUrl = 'https://t.me/YOUR_TELEGRAM_BOT';
-                          await launchUrl(Uri.parse(telegramUrl));
+                          try {
+                            final link = await AuthService.getBotLink();
+                            if (link.isNotEmpty)
+                              await launchUrl(Uri.parse(link));
+                          } catch (e) {
+                            // fallback: open configured bot username link if available
+                            const telegramUrl =
+                                'https://t.me/YOUR_TELEGRAM_BOT';
+                            await launchUrl(Uri.parse(telegramUrl));
+                          }
                         },
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,

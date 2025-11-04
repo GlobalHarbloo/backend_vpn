@@ -214,6 +214,46 @@ func (r *UserRepository) UpdatePasswordByEmail(email, newPassword string) error 
 	return nil
 }
 
+// UpdatePasswordIfMatchesEmail verifies the old password for the user with given email
+// and updates it to newPassword if it matches.
+func (r *UserRepository) UpdatePasswordIfMatchesEmail(email, oldPassword, newPassword string) error {
+	var user models.User
+	if err := r.DB.Where("email = ?", email).First(&user).Error; err != nil {
+		return fmt.Errorf("user not found: %w", err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(oldPassword)); err != nil {
+		return fmt.Errorf("old password does not match")
+	}
+	hashed, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+	if err := r.DB.Model(&models.User{}).Where("id = ?", user.ID).Update("password", string(hashed)).Error; err != nil {
+		return fmt.Errorf("failed to update password: %w", err)
+	}
+	return nil
+}
+
+// UpdatePasswordIfMatchesUserID verifies the old password for the user with given id
+// and updates it to newPassword if it matches.
+func (r *UserRepository) UpdatePasswordIfMatchesUserID(userID int, oldPassword, newPassword string) error {
+	var user models.User
+	if err := r.DB.First(&user, userID).Error; err != nil {
+		return fmt.Errorf("user not found: %w", err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(oldPassword)); err != nil {
+		return fmt.Errorf("old password does not match")
+	}
+	hashed, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+	if err := r.DB.Model(&models.User{}).Where("id = ?", user.ID).Update("password", string(hashed)).Error; err != nil {
+		return fmt.Errorf("failed to update password: %w", err)
+	}
+	return nil
+}
+
 func (r *UserRepository) SetPasswordResetToken(email, token string, expiresAt time.Time) error {
 	return r.DB.Model(&models.User{}).Where("email = ?", email).
 		Updates(map[string]interface{}{

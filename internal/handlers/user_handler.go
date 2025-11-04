@@ -438,8 +438,11 @@ func (h *UserHandler) GetBotLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	link := fmt.Sprintf("https://t.me/%s?start=%s", h.BotUsername, url.QueryEscape(token))
-	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"link": link})
+	// Provide both an HTTPS link and a tg:// resolve link. The app can prefer the
+	// tg:// scheme to open the native Telegram app when available.
+	httpsLink := fmt.Sprintf("https://t.me/%s?start=%s", h.BotUsername, url.QueryEscape(token))
+	tgLink := fmt.Sprintf("tg://resolve?domain=%s&start=%s", h.BotUsername, url.QueryEscape(token))
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"link": httpsLink, "tg_link": tgLink})
 }
 
 func (h *UserHandler) GetHiddifyConfig(w http.ResponseWriter, r *http.Request) {
@@ -573,27 +576,13 @@ func (h *UserHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		utils.RespondWithError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	user, err := h.Auth.UserRepo.FindByID(userID)
-	if err != nil {
-		utils.RespondWithError(w, http.StatusNotFound, "User not found")
+	// Delegate password verification and update to repository helper to keep logic consistent
+	if err := h.Auth.UserRepo.UpdatePasswordIfMatchesUserID(userID, data.OldPassword, data.NewPassword); err != nil {
+		// Reuse error messages from repo, but avoid leaking details
+		utils.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("Failed to change password: %v", err))
 		return
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(data.OldPassword)); err != nil {
-		utils.RespondWithError(w, http.StatusBadRequest, "Wrong old password")
-		return
-	}
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(data.NewPassword), bcrypt.DefaultCost)
-	if err != nil {
-		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to hash password")
-		return
-	}
-	user.Password = string(hashedPassword)
-	user.PasswordResetToken = ""
-	user.PasswordResetExpiresAt = time.Time{}
-	if err := h.Auth.UserRepo.DB.Save(user).Error; err != nil {
-		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to update password")
-		return
-	}
+	// Password successfully changed
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "password changed"})
 }
 

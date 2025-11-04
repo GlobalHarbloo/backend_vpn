@@ -1,23 +1,27 @@
 package services
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/google/uuid"
 
 	"github.com/yourusername/vpn-backend/config"
-	"github.com/yourusername/vpn-backend/internal/models"
 	"github.com/yourusername/vpn-backend/internal/repository"
-	"golang.org/x/crypto/bcrypt"
 )
 
-// BotService holds bot and required dependencies.
+// Clean, single implementation of an HTTP-polling Telegram bot.
+// Keeps implementation minimal: /start <token>, /tariffs, /pay <tariff_id>, /register, /login, /updatepassword.
+// Single clean implementation of the Telegram bot (HTTP polling).
 type BotService struct {
-	BotAPI     *tgbotapi.BotAPI
+	Token      string
 	Logger     *log.Logger
 	UserRepo   *repository.UserRepository
 	Auth       *AuthService
@@ -28,18 +32,11 @@ type BotService struct {
 
 var botService *BotService
 
-// InitBot initializes the Telegram bot and stores dependencies.
 func InitBot(token string, userRepo *repository.UserRepository, auth *AuthService, payment *PaymentService, tariffRepo *repository.TariffRepository, cfg *config.Config) error {
-	b, err := tgbotapi.NewBotAPI(token)
-	if err != nil {
-		return fmt.Errorf("failed to create bot: %w", err)
-	}
-
 	logger := log.New(log.Writer(), "bot: ", log.Ldate|log.Ltime|log.Lshortfile)
-	logger.Println("Bot successfully initialized.")
-
+	logger.Println("Bot initialized (HTTP polling)")
 	botService = &BotService{
-		BotAPI:     b,
+		Token:      token,
 		Logger:     logger,
 		UserRepo:   userRepo,
 		Auth:       auth,
@@ -50,35 +47,124 @@ func InitBot(token string, userRepo *repository.UserRepository, auth *AuthServic
 	return nil
 }
 
-// HandleCommands routes incoming updates to handlers.
-func HandleCommands(update tgbotapi.Update) {
-	if botService == nil || update.Message == nil || update.Message.Text == "" {
+// minimal Telegram types
+type tgUpdateResp struct {
+	Ok     bool       `json:"ok"`
+	Result []tgUpdate `json:"result"`
+}
+type tgUpdate struct {
+	UpdateID      int              `json:"update_id"`
+	Message       *tgMessage       `json:"message,omitempty"`
+	CallbackQuery *tgCallbackQuery `json:"callback_query,omitempty"`
+}
+type tgMessage struct {
+	MessageID int     `json:"message_id"`
+	From      *tgUser `json:"from,omitempty"`
+	Chat      *tgChat `json:"chat,omitempty"`
+	Date      int     `json:"date,omitempty"`
+	Text      string  `json:"text,omitempty"`
+}
+type tgUser struct {
+	ID        int64  `json:"id"`
+	FirstName string `json:"first_name"`
+	Username  string `json:"username"`
+}
+type tgChat struct {
+	ID int64 `json:"id"`
+}
+
+type tgCallbackQuery struct {
+	ID      string     `json:"id"`
+	From    *tgUser    `json:"from,omitempty"`
+	Message *tgMessage `json:"message,omitempty"`
+	Data    string     `json:"data,omitempty"`
+}
+
+func sendMessage(chatID int64, text string) {
+	if botService == nil {
 		return
 	}
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botService.Token)
+	payload := map[string]interface{}{"chat_id": chatID, "text": text}
+	b, _ := json.Marshal(payload)
+	resp, err := http.Post(url, "application/json", bytes.NewReader(b))
+	if err != nil {
+		botService.Logger.Printf("sendMessage error: %v", err)
+		return
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+}
 
-	command, args := parseCommand(update.Message.Text)
-
-	switch command {
-	case "/start":
-		handleStart(update, args)
-	case "/help":
-		sendMessage(update.Message.Chat.ID, "Available commands: /start <token>, /tariffs, /pay <tariff_id>, /register <email> <password>, /login <email> <password>, /updatepassword <email> <new_password>")
-	case "/register":
-		handleRegister(update, args)
-	case "/login":
-		handleLogin(update, args)
-	case "/updatepassword":
-		handleUpdatePassword(update, args)
-	case "/tariffs":
-		handleTariffs(update)
-	case "/pay":
-		handlePay(update, args)
-	default:
-		sendMessage(update.Message.Chat.ID, "Unknown command. Type /help for available commands.")
+// sendToAdmins sends a message to all admin chat IDs configured in the server config.
+func sendToAdmins(text string) {
+	if botService == nil || botService.Config == nil {
+		return
+	}
+	ids := strings.Split(botService.Config.AdminChatIDs, ",")
+	for _, s := range ids {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			botService.Logger.Printf("invalid admin chat id: %s", s)
+			continue
+		}
+		sendMessage(id, text)
 	}
 }
 
-// parseCommand splits the message into command and args.
+// answerCallback sends an answerCallbackQuery to Telegram to acknowledge a button press.
+func answerCallback(callbackID string, text string) {
+	if botService == nil {
+		return
+	}
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/answerCallbackQuery", botService.Token)
+	payload := map[string]interface{}{"callback_query_id": callbackID, "text": text, "show_alert": false}
+	b, _ := json.Marshal(payload)
+	resp, err := http.Post(url, "application/json", bytes.NewReader(b))
+	if err != nil {
+		botService.Logger.Printf("answerCallback error: %v", err)
+		return
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+}
+
+// sendMessageWithReplyMarkup sends a message with a custom reply_markup (keyboard or inline keyboard)
+func sendMessageWithReplyMarkup(chatID int64, text string, replyMarkup interface{}) {
+	if botService == nil {
+		return
+	}
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botService.Token)
+	payload := map[string]interface{}{"chat_id": chatID, "text": text, "reply_markup": replyMarkup}
+	b, _ := json.Marshal(payload)
+	resp, err := http.Post(url, "application/json", bytes.NewReader(b))
+	if err != nil {
+		botService.Logger.Printf("sendMessageWithReplyMarkup error: %v", err)
+		return
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+}
+
+// helper to send a simple reply keyboard (rows of button texts)
+func sendMessageWithKeyboard(chatID int64, text string, keyboard [][]string) {
+	// build Telegram reply keyboard format
+	rows := make([][]map[string]string, 0, len(keyboard))
+	for _, r := range keyboard {
+		row := make([]map[string]string, 0, len(r))
+		for _, btn := range r {
+			row = append(row, map[string]string{"text": btn})
+		}
+		rows = append(rows, row)
+	}
+	reply := map[string]interface{}{"keyboard": rows, "resize_keyboard": true, "one_time_keyboard": false}
+	sendMessageWithReplyMarkup(chatID, text, reply)
+}
+
 func parseCommand(input string) (string, []string) {
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
@@ -87,128 +173,111 @@ func parseCommand(input string) (string, []string) {
 	return parts[0], parts[1:]
 }
 
-// sendMessage sends a text message and logs failures.
-func sendMessage(chatID int64, text string) {
-	msg := tgbotapi.NewMessage(chatID, text)
-	if _, err := botService.BotAPI.Send(msg); err != nil {
-		botService.Logger.Printf("Failed to send message: %v\n", err)
-	}
-}
-
-// handleRegister creates a new user via AuthService.Register.
-// Usage: /register <email> <password>
-func handleRegister(update tgbotapi.Update, args []string) {
+// Handlers (register/login/updatepassword/start/tariffs/pay)
+func handleRegister(chatID int64, args []string) {
 	if len(args) < 2 {
-		sendMessage(update.Message.Chat.ID, "Usage: /register <email> <password>")
+		sendMessage(chatID, "Usage: /register <email> <password>")
 		return
 	}
-
 	email, password := args[0], args[1]
-	// generate UUID for the user
 	uuidStr := uuid.NewString()
 	user, err := botService.Auth.Register(email, password, uuidStr, 0)
 	if err != nil {
-		sendMessage(update.Message.Chat.ID, fmt.Sprintf("Error registering user: %s", err))
+		sendMessage(chatID, fmt.Sprintf("Error registering user: %s", err))
 		return
 	}
-
-	sendMessage(update.Message.Chat.ID, fmt.Sprintf("User %s registered successfully!", user.Email))
+	sendMessage(chatID, fmt.Sprintf("User %s registered successfully!", user.Email))
 }
 
-// handleLogin authenticates user credentials and links Telegram ID.
-// Usage: /login <email> <password>
-func handleLogin(update tgbotapi.Update, args []string) {
+func handleLogin(chatID int64, fromID int64, args []string) {
 	if len(args) < 2 {
-		sendMessage(update.Message.Chat.ID, "Usage: /login <email> <password>")
+		sendMessage(chatID, "Usage: /login <email> <password>")
 		return
 	}
-
 	identifier, password := args[0], args[1]
 	_, _, err := botService.Auth.AuthenticateUser(identifier, password)
 	if err != nil {
-		sendMessage(update.Message.Chat.ID, fmt.Sprintf("Error logging in: %s", err))
+		sendMessage(chatID, fmt.Sprintf("Error logging in: %s", err))
 		return
 	}
-
-	// find user and link telegram id
 	user, err := botService.UserRepo.GetUserByEmail(identifier)
 	if err != nil {
-		sendMessage(update.Message.Chat.ID, fmt.Sprintf("Error finding user: %s", err))
+		sendMessage(chatID, fmt.Sprintf("Error finding user: %s", err))
 		return
 	}
-
-	if err := botService.UserRepo.UpdateUserTelegramID(int(user.ID), int64(update.Message.From.ID)); err != nil {
-		sendMessage(update.Message.Chat.ID, fmt.Sprintf("Error linking Telegram ID: %s", err))
+	if err := botService.UserRepo.UpdateUserTelegramID(int(user.ID), fromID); err != nil {
+		sendMessage(chatID, fmt.Sprintf("Error linking Telegram ID: %s", err))
 		return
 	}
-
-	sendMessage(update.Message.Chat.ID, fmt.Sprintf("User %s logged in successfully!", user.Email))
+	sendMessage(chatID, fmt.Sprintf("User %s logged in and linked successfully!", user.Email))
 }
 
-// handleUpdatePassword updates a user's password by email.
-// Usage: /updatepassword <email> <new_password>
-func handleUpdatePassword(update tgbotapi.Update, args []string) {
-	if len(args) < 2 {
-		sendMessage(update.Message.Chat.ID, "Usage: /updatepassword <email> <new_password>")
+func handleUpdatePassword(chatID int64, fromID int64, args []string) {
+	// Two modes supported:
+	// 1) If user is linked by telegram and provides: /updatepassword <old_password> <new_password>
+	// 2) If not linked (or admin flow): /updatepassword <email> <old_password> <new_password>
+	if len(args) == 2 {
+		// try to resolve user by telegram id
+		user, err := botService.UserRepo.GetUserByTelegramID(fromID)
+		if err != nil {
+			sendMessage(chatID, "Usage: /updatepassword <email> <old_password> <new_password> — or link your account via /start <token> first")
+			return
+		}
+		oldPass := args[0]
+		newPass := args[1]
+		if err := botService.UserRepo.UpdatePasswordIfMatchesUserID(int(user.ID), oldPass, newPass); err != nil {
+			sendMessage(chatID, fmt.Sprintf("Error updating password: %s", err))
+			return
+		}
+		sendMessage(chatID, "Password updated successfully!")
 		return
 	}
 
-	email, newPassword := args[0], args[1]
-	// find user
-	user, err := botService.UserRepo.GetUserByEmail(email)
-	if err != nil {
-		sendMessage(update.Message.Chat.ID, fmt.Sprintf("Error finding user: %s", err))
+	if len(args) == 3 {
+		email := args[0]
+		oldPass := args[1]
+		newPass := args[2]
+		if err := botService.UserRepo.UpdatePasswordIfMatchesEmail(email, oldPass, newPass); err != nil {
+			sendMessage(chatID, fmt.Sprintf("Error updating password: %s", err))
+			return
+		}
+		sendMessage(chatID, "Password updated successfully!")
 		return
 	}
 
-	// hash password and update
-	hashed, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
-	if err != nil {
-		sendMessage(update.Message.Chat.ID, fmt.Sprintf("Error hashing password: %s", err))
-		return
-	}
-
-	user.Password = string(hashed)
-	if err := botService.UserRepo.DB.Model(&models.User{}).Where("id = ?", user.ID).Update("password", user.Password).Error; err != nil {
-		sendMessage(update.Message.Chat.ID, fmt.Sprintf("Error updating password: %s", err))
-		return
-	}
-
-	sendMessage(update.Message.Chat.ID, "Password updated successfully!")
+	sendMessage(chatID, "Usage: /updatepassword <old_password> <new_password> (when account linked with bot)\nor /updatepassword <email> <old_password> <new_password>")
 }
 
-// handleStart validates bot deep link token, links telegram id to user, and shows payment options
-// Usage: /start <token>
-func handleStart(update tgbotapi.Update, args []string) {
+func handleStart(chatID int64, fromID int64, args []string) {
 	if len(args) < 1 {
-		sendMessage(update.Message.Chat.ID, "Usage: /start <token>")
+		sendMessage(chatID, "Usage: /start <token>")
 		return
 	}
 	token := args[0]
 	userID, err := botService.Auth.ValidateBotToken(token)
 	if err != nil {
-		sendMessage(update.Message.Chat.ID, "Invalid or expired token. Please request the bot link from the app again.")
+		sendMessage(chatID, "Invalid or expired token. Please request the bot link from the app again.")
 		return
 	}
-
-	// Link telegram ID
-	if err := botService.UserRepo.UpdateUserTelegramID(userID, int64(update.Message.From.ID)); err != nil {
-		sendMessage(update.Message.Chat.ID, fmt.Sprintf("Failed to link account: %v", err))
+	if err := botService.UserRepo.UpdateUserTelegramID(userID, fromID); err != nil {
+		sendMessage(chatID, fmt.Sprintf("Failed to link account: %v", err))
 		return
 	}
-
-	sendMessage(update.Message.Chat.ID, "Аккаунт успешно привязан. Чтобы оплатить подписку, используйте команду: /tariffs — посмотреть тарифы, /pay <tariff_id> — оплатить.")
+	// friendly greeting and quick-action keyboard
+	welcome := "Аккаунт успешно привязан. Добро пожаловать! Ниже — быстрые команды."
+	keyboard := [][]string{{"/tariffs", "/pay"}, {"/me", "/offer"}, {"/help"}}
+	sendMessageWithKeyboard(chatID, welcome, keyboard)
+	sendMessage(chatID, "Чтобы оплатить конкретный тариф, выполните: /pay <tariff_id>. Просмотреть тарифы: /tariffs")
 }
 
-// handleTariffs lists available tariffs
-func handleTariffs(update tgbotapi.Update) {
+func handleTariffs(chatID int64) {
 	tariffs, err := botService.TariffRepo.GetAll()
 	if err != nil {
-		sendMessage(update.Message.Chat.ID, "Не удалось получить список тарифов.")
+		sendMessage(chatID, "Не удалось получить список тарифов.")
 		return
 	}
 	if len(tariffs) == 0 {
-		sendMessage(update.Message.Chat.ID, "Тарифы не настроены.")
+		sendMessage(chatID, "Тарифы не настроены.")
 		return
 	}
 	var b strings.Builder
@@ -217,60 +286,205 @@ func handleTariffs(update tgbotapi.Update) {
 		b.WriteString(fmt.Sprintf("%d) %s — %.0f RUB — %d MB\n", t.ID, t.Name, t.Price, t.TrafficLimit/1024/1024))
 	}
 	b.WriteString("Оплатите тариф командой: /pay <tariff_id>")
-	sendMessage(update.Message.Chat.ID, b.String())
+	// Additionally provide an inline keyboard with Buy buttons
+	// build inline keyboard structure
+	var inlineRows [][]map[string]interface{}
+	for _, t := range tariffs {
+		btn := map[string]interface{}{"text": fmt.Sprintf("Купить %s — %.0f₽", t.Name, t.Price), "callback_data": fmt.Sprintf("buy:%d", t.ID)}
+		inlineRows = append(inlineRows, []map[string]interface{}{btn})
+	}
+	reply := map[string]interface{}{"inline_keyboard": inlineRows}
+	sendMessageWithReplyMarkup(chatID, b.String(), reply)
 }
 
-// handlePay creates YooKassa payment and returns confirmation URL
-// Usage: /pay <tariff_id>
-func handlePay(update tgbotapi.Update, args []string) {
+func handlePay(chatID int64, fromID int64, args []string) {
 	if len(args) < 1 {
-		sendMessage(update.Message.Chat.ID, "Usage: /pay <tariff_id>")
+		sendMessage(chatID, "Usage: /pay <tariff_id>")
 		return
 	}
-	tid := args[0]
-	tariffID, err := strconv.Atoi(tid)
+	tariffID, err := strconv.Atoi(args[0])
 	if err != nil {
-		sendMessage(update.Message.Chat.ID, "Invalid tariff id")
+		sendMessage(chatID, "Invalid tariff id")
 		return
 	}
-	// find user by telegram id
-	user, err := botService.UserRepo.GetUserByTelegramID(int64(update.Message.From.ID))
+	user, err := botService.UserRepo.GetUserByTelegramID(fromID)
 	if err != nil {
-		sendMessage(update.Message.Chat.ID, "Аккаунт не привязан. Пожалуйста, выполните /start <token> в боте сначала.")
+		sendMessage(chatID, "Аккаунт не привязан. Пожалуйста, выполните /start <token> в боте сначала.")
 		return
 	}
-
 	tariff, err := botService.TariffRepo.FindByID(tariffID)
 	if err != nil {
-		sendMessage(update.Message.Chat.ID, "Тариф не найден")
+		sendMessage(chatID, "Тариф не найден")
 		return
 	}
-
 	amountRub := int(tariff.Price)
 	description := fmt.Sprintf("%s — подписка %s", user.Email, tariff.Name)
-	// Create YooKassa payment
-	confirmURL, _, err := botService.Payment.CreateYooKassaPayment(int(user.ID), 1, botService.Config.YooKassaReturnURL, botService.Config.YooKassaShopID, botService.Config.YooKassaSecret, amountRub, description)
+	confirmURL, providerID, err := botService.Payment.CreateYooKassaPayment(int(user.ID), 1, botService.Config.YooKassaReturnURL, botService.Config.YooKassaShopID, botService.Config.YooKassaSecret, amountRub, description)
 	if err != nil {
-		sendMessage(update.Message.Chat.ID, fmt.Sprintf("Не удалось создать платёж: %v", err))
+		sendMessage(chatID, fmt.Sprintf("Не удалось создать платёж: %v", err))
 		return
 	}
-	// Send confirmation URL to user
-	sendMessage(update.Message.Chat.ID, fmt.Sprintf("Платёж создан. Перейдите по ссылке для оплаты: %s", confirmURL))
+	sendMessage(chatID, fmt.Sprintf("Платёж создан. Перейдите по ссылке для оплаты: %s", confirmURL))
+	// Send receipt to the user chat (provider id + amount)
+	sendMessage(chatID, fmt.Sprintf("Ссылка на оплату: %s", confirmURL))
+	// If providerID is returned include it in the receipt
+	if providerID != "" {
+		sendMessage(chatID, fmt.Sprintf("Идентификатор платёжной системы: %s", providerID))
+	}
+	// Notify administrators in configured admin chats with details (email, amount, provider, link)
+	adminMsg := fmt.Sprintf("Платёж создан пользователем %s на %d ₽. Ссылка: %s", user.Email, amountRub, confirmURL)
+	sendToAdmins(adminMsg)
 }
 
-// StartBot starts listening for updates and dispatches them to the handler.
+// handleCallback processes inline callback queries (e.g., buy:<tariff_id>)
+func handleCallback(cb *tgCallbackQuery) {
+	if cb == nil {
+		return
+	}
+	data := cb.Data
+	if strings.HasPrefix(data, "buy:") {
+		parts := strings.SplitN(data, ":", 2)
+		if len(parts) != 2 {
+			answerCallback(cb.ID, "Неверная команда")
+			return
+		}
+		tid, err := strconv.Atoi(parts[1])
+		if err != nil {
+			answerCallback(cb.ID, "Неверный id тарифа")
+			return
+		}
+		// Try to find user by telegram id
+		user, err := botService.UserRepo.GetUserByTelegramID(cb.From.ID)
+		if err != nil {
+			answerCallback(cb.ID, "Аккаунт не привязан. Откройте бота через приложение и привяжите аккаунт.")
+			return
+		}
+		tariff, err := botService.TariffRepo.FindByID(tid)
+		if err != nil {
+			answerCallback(cb.ID, "Тариф не найден")
+			return
+		}
+		amountRub := int(tariff.Price)
+		description := fmt.Sprintf("%s — подписка %s", user.Email, tariff.Name)
+		confirmURL, providerID, err := botService.Payment.CreateYooKassaPayment(int(user.ID), 1, botService.Config.YooKassaReturnURL, botService.Config.YooKassaShopID, botService.Config.YooKassaSecret, amountRub, description)
+		if err != nil {
+			answerCallback(cb.ID, "Не удалось создать платёж")
+			return
+		}
+		// Acknowledge the button press and send link
+		answerCallback(cb.ID, "Платёж создан, проверьте ссылку в чате")
+		sendMessage(cb.Message.Chat.ID, fmt.Sprintf("Платёж создан. Перейдите по ссылке для оплаты: %s", confirmURL))
+		// Send receipt to the user chat
+		sendMessage(cb.Message.Chat.ID, fmt.Sprintf("Чек: сумма %d ₽.", amountRub))
+		if providerID != "" {
+			sendMessage(cb.Message.Chat.ID, fmt.Sprintf("Идентификатор платёжной системы: %s", providerID))
+		}
+		// Notify administrators in configured admin chats
+		adminMsg := fmt.Sprintf("Платёж создан пользователем %s на %d ₽. ProviderID: %s. Ссылка: %s", user.Email, amountRub, providerID, confirmURL)
+		sendToAdmins(adminMsg)
+	} else {
+		answerCallback(cb.ID, "Неизвестная команда")
+	}
+}
+
+func handleMe(chatID int64, fromID int64) {
+	user, err := botService.UserRepo.GetUserByTelegramID(fromID)
+	if err != nil {
+		sendMessage(chatID, "Аккаунт не привязан. Пожалуйста, выполните /start <token> в боте сначала.")
+		return
+	}
+	// Try to get tariff expiry info
+	expiry, err := botService.Payment.GetTariffExpiry(int(user.ID))
+	var expiryStr string
+	if err != nil {
+		expiryStr = "неизвестно"
+	} else if expiry.IsZero() {
+		expiryStr = "нет подписки"
+	} else {
+		expiryStr = expiry.Format("2006-01-02 15:04:05")
+	}
+	// Build info
+	info := fmt.Sprintf("Информация о пользователе:\nEmail: %s\nПодписка до: %s\nИспользовано трафика: %d байт", user.Email, expiryStr, user.UsedTraffic)
+	sendMessage(chatID, info)
+}
+
+func handleOffer(chatID int64) {
+	if botService == nil || botService.Config == nil {
+		sendMessage(chatID, "Публичная оферта недоступна")
+		return
+	}
+	offer := botService.Config.PublicOfferURL
+	if offer == "" {
+		// fallback to frontend URL + /offer
+		if botService.Config.FrontendURL != "" {
+			offer = strings.TrimRight(botService.Config.FrontendURL, "/") + "/offer"
+		}
+	}
+	if offer == "" {
+		sendMessage(chatID, "Публичная оферта не настроена на сервере")
+		return
+	}
+	sendMessage(chatID, fmt.Sprintf("Публичная оферта: %s", offer))
+}
+
 func StartBot() error {
 	if botService == nil {
 		return fmt.Errorf("bot is not initialized")
 	}
-
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
-
-	updates := botService.BotAPI.GetUpdatesChan(u)
-
-	for update := range updates {
-		HandleCommands(update)
+	offset := 0
+	for {
+		url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?timeout=60&offset=%d", botService.Token, offset)
+		resp, err := http.Get(url)
+		if err != nil {
+			botService.Logger.Printf("getUpdates error: %v", err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var ur tgUpdateResp
+		if err := json.Unmarshal(body, &ur); err != nil {
+			botService.Logger.Printf("invalid updates response: %v", err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		for _, u := range ur.Result {
+			if u.UpdateID >= offset {
+				offset = u.UpdateID + 1
+			}
+			// handle callback_query first
+			if u.CallbackQuery != nil {
+				go handleCallback(u.CallbackQuery)
+				continue
+			}
+			if u.Message == nil || u.Message.Text == "" {
+				continue
+			}
+			text := u.Message.Text
+			cmd, args := parseCommand(text)
+			switch cmd {
+			case "/start":
+				handleStart(u.Message.Chat.ID, u.Message.From.ID, args)
+			case "/help":
+				helpText := "Доступные команды: /start <token>, /tariffs, /pay <tariff_id>, /register <email> <password>, /login <email> <password>, /updatepassword, /me, /offer"
+				sendMessageWithKeyboard(u.Message.Chat.ID, helpText, [][]string{{"/tariffs", "/pay"}, {"/me", "/offer"}, {"/register", "/login"}})
+			case "/offer":
+				handleOffer(u.Message.Chat.ID)
+			case "/me":
+				handleMe(u.Message.Chat.ID, u.Message.From.ID)
+			case "/register":
+				handleRegister(u.Message.Chat.ID, args)
+			case "/login":
+				handleLogin(u.Message.Chat.ID, u.Message.From.ID, args)
+			case "/updatepassword":
+				handleUpdatePassword(u.Message.Chat.ID, u.Message.From.ID, args)
+			case "/tariffs":
+				handleTariffs(u.Message.Chat.ID)
+			case "/pay":
+				handlePay(u.Message.Chat.ID, u.Message.From.ID, args)
+			default:
+				sendMessage(u.Message.Chat.ID, "Unknown command. Type /help for available commands.")
+			}
+		}
 	}
-	return nil
 }

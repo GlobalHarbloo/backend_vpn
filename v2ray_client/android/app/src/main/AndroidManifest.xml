@@ -4,7 +4,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.BIND_VPN_SERVICE" />
     <application
-        android:label="v2ray_client"
+        android:label="Fresh vpn"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

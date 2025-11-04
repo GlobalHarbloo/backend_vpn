@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_v2ray/flutter_v2ray.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:v2ray_client/features/auth/services/auth_service.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 
 class VpnPage extends StatefulWidget {
   const VpnPage({Key? key}) : super(key: key);
@@ -17,6 +19,9 @@ class _VpnPageState extends State<VpnPage> {
   bool _isConnected = false;
   bool _isLoading = false;
   String? _error;
+  Map<String, dynamic>? _profile;
+  bool _profileLoading = false;
+  bool _hasAccess = false;
   String _selectedConfig = 'ws';
   bool _ignoreStatusChange = false;
   V2RayURL? _parser;
@@ -58,6 +63,7 @@ class _VpnPageState extends State<VpnPage> {
   @override
   void initState() {
     super.initState();
+    _loadProfile();
     _flutterV2ray = FlutterV2ray(
       onStatusChanged: (status) {
         if (_ignoreStatusChange) return;
@@ -70,6 +76,35 @@ class _VpnPageState extends State<VpnPage> {
         debugPrint('[VPN] Status changed: ${status.toString()}');
       },
     );
+  }
+
+  String _fmtDate(dynamic value) {
+    if (value == null || (value is String && value.isEmpty)) return '-';
+    try {
+      final dt = DateTime.parse(value.toString()).toLocal();
+      return DateFormat('dd.MM.yyyy HH:mm').format(dt);
+    } catch (_) {
+      return value.toString();
+    }
+  }
+
+  Future<void> _loadProfile() async {
+    setState(() {
+      _profileLoading = true;
+    });
+    try {
+      final data = await AuthService.getProfile();
+      setState(() {
+        _profile = data;
+        _hasAccess = data['has_access'] == true;
+        _profileLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _profile = null;
+        _profileLoading = false;
+      });
+    }
   }
 
   Future<void> _requestNotificationPermission() async {
@@ -237,6 +272,57 @@ class _VpnPageState extends State<VpnPage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              if (_profileLoading) ...[
+                const Padding(
+                  padding: EdgeInsets.all(12.0),
+                  child: CircularProgressIndicator(),
+                ),
+              ],
+              // Баннер для триала (если есть trial_ends_at и доступа нет)
+              if ((_profile != null &&
+                  !_hasAccess &&
+                  _profile?['trial_ends_at'] != null)) ...[
+                Card(
+                  color: Colors.yellow[100],
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Триал активирован до: ${_fmtDate(_profile?['trial_ends_at'])}. Чтобы продолжить, оплатите через нашего Telegram-бота.',
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () async {
+                            try {
+                              final link = await AuthService.getBotLink();
+                              if (link.isNotEmpty)
+                                await launchUrl(Uri.parse(link));
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Ошибка: ${e.toString()}'),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          child: const Text('Приобрести лицензию'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
               const Text('Выберите тип подключения:'),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,

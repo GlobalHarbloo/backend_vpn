@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../vpn/presentation/pages/vpn_page.dart';
 import '../../../traffic/presentation/pages/traffic_page.dart';
 import 'profile_page.dart';
-import '../../../payments/presentation/pages/payments_page.dart';
+// payments page is temporarily removed until payment flow is ready
 
 class MainNavPage extends StatefulWidget {
   const MainNavPage({super.key});
@@ -23,8 +23,7 @@ class _MainNavPageState extends State<MainNavPage> {
     _pages = [
       const VpnPage(),
       const TrafficPage(),
-      const PaymentsPage(),
-      ProfilePage(tabNotifier: _tabNotifier, tabIndex: 3),
+      ProfilePage(tabNotifier: _tabNotifier, tabIndex: 2),
     ];
   }
 
@@ -48,10 +47,9 @@ class _MainNavPageState extends State<MainNavPage> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.vpn_lock), label: 'VPN'),
           BottomNavigationBarItem(icon: Icon(Icons.bar_chart), label: 'Трафик'),
-          BottomNavigationBarItem(icon: Icon(Icons.payment), label: 'Платежи'),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Профиль'),
         ],
       ),
     );
   }
-} 
+}
