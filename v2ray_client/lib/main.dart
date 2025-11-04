@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'features/core/presentation/pages/main_nav_page.dart';
 import 'features/auth/presentation/pages/login_page.dart';
 import 'features/auth/presentation/pages/register_page.dart';
+import 'features/auth/presentation/pages/reset_password_page.dart';
+import 'features/auth/presentation/pages/change_password_page.dart';
 import 'features/auth/services/auth_service.dart';
 
 void main() {
@@ -28,11 +30,13 @@ class _MyAppState extends State<MyApp> {
     final loggedIn = await AuthService.isLoggedIn();
     if (loggedIn) {
       // Тихо обновим профиль, чтобы синхронизировать токен/uuid/has_access на старте
-      try { await AuthService.getProfile(); } catch (_) {}
+      try {
+        await AuthService.getProfile();
+      } catch (_) {}
     }
     setState(() {
       _isLoggedIn = loggedIn;
-      });
+    });
   }
 
   @override
@@ -51,6 +55,8 @@ class _MyAppState extends State<MyApp> {
       routes: {
         '/login': (context) => const LoginPage(),
         '/register': (context) => const RegisterPage(),
+        '/reset-password': (context) => const ResetPasswordPage(),
+        '/change-password': (context) => const ChangePasswordPage(),
         '/main': (context) => const MainNavPage(),
       },
     );

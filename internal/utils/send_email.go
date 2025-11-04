@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"log"
 	"net"
+	"net/mail"
 	"net/smtp"
 	"os"
 	"time"
@@ -25,14 +26,22 @@ func SendEmail(to, subject, plainBody, htmlBody string) error {
 	}
 	smtpUser := os.Getenv("SMTP_USER")
 	smtpPass := os.Getenv("SMTP_PASS")
+	// From header (can be "Name <email>") and envelopeFrom (plain address for SMTP MAIL FROM)
 	from := os.Getenv("EMAIL_FROM")
 	if from == "" {
 		from = smtpUser
 	}
+	headerFrom := from
+	envelopeFrom := smtpUser
+	if parsed, err := mail.ParseAddress(from); err == nil {
+		// parsed.Address is plain email for MAIL FROM, parsed.String() is properly formatted header
+		envelopeFrom = parsed.Address
+		headerFrom = parsed.String()
+	}
 
 	boundary := "==BOUNDARY=="
 	var buf bytes.Buffer
-	buf.WriteString(fmt.Sprintf("From: %s\r\n", from))
+	buf.WriteString(fmt.Sprintf("From: %s\r\n", headerFrom))
 	buf.WriteString(fmt.Sprintf("To: %s\r\n", to))
 	buf.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
 	buf.WriteString("MIME-Version: 1.0\r\n")
@@ -73,7 +82,8 @@ func SendEmail(to, subject, plainBody, htmlBody string) error {
 		if err := c.Auth(auth); err != nil {
 			return fmt.Errorf("smtp auth: %w", err)
 		}
-		if err := c.Mail(from); err != nil {
+		// MAIL FROM must be a plain email address, not a display name. Use envelopeFrom.
+		if err := c.Mail(envelopeFrom); err != nil {
 			return err
 		}
 		if err := c.Rcpt(to); err != nil {
@@ -113,7 +123,7 @@ func SendEmail(to, subject, plainBody, htmlBody string) error {
 	if err := c.Auth(auth); err != nil {
 		return fmt.Errorf("smtp auth: %w", err)
 	}
-	if err := c.Mail(from); err != nil {
+	if err := c.Mail(envelopeFrom); err != nil {
 		return err
 	}
 	if err := c.Rcpt(to); err != nil {

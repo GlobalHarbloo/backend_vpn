@@ -6,16 +6,18 @@ import (
 )
 
 type Config struct {
-	DbURL             string
-	ServerPort        string
-	JWTSecret         string
-	AdminToken        string
-	XrayConfigPath    string
-	XrayTemplatePath  string
-	YooKassaShopID    string
-	YooKassaSecret    string
-	YooKassaReturnURL string
-	FrontendURL       string
+	DbURL               string
+	ServerPort          string
+	JWTSecret           string
+	AdminToken          string
+	TelegramBotUsername string
+	TelegramBotToken    string
+	XrayConfigPath      string
+	XrayTemplatePath    string
+	YooKassaShopID      string
+	YooKassaSecret      string
+	YooKassaReturnURL   string
+	FrontendURL         string
 }
 
 func Load() *Config {
@@ -29,18 +31,22 @@ func Load() *Config {
 	yooSecret := getEnv("YOOKASSA_SECRET", "")
 	yooReturnURL := getEnv("YOOKASSA_RETURN_URL", "")
 	frontendURL := getEnv("FRONTEND_URL", "https://your-frontend.com")
+	telegramBot := getEnv("TELEGRAM_BOT_USERNAME", "")
+	telegramToken := getEnv("TELEGRAM_BOT_TOKEN", "")
 
 	return &Config{
-		DbURL:             dbURL,
-		ServerPort:        serverPort,
-		JWTSecret:         jwtSecret,
-		AdminToken:        adminToken,
-		XrayConfigPath:    xrayConfigPath,
-		XrayTemplatePath:  xrayTemplatePath,
-		YooKassaShopID:    yooShopID,
-		YooKassaSecret:    yooSecret,
-		YooKassaReturnURL: yooReturnURL,
-		FrontendURL:       frontendURL,
+		DbURL:               dbURL,
+		ServerPort:          serverPort,
+		JWTSecret:           jwtSecret,
+		AdminToken:          adminToken,
+		TelegramBotUsername: telegramBot,
+		TelegramBotToken:    telegramToken,
+		XrayConfigPath:      xrayConfigPath,
+		XrayTemplatePath:    xrayTemplatePath,
+		YooKassaShopID:      yooShopID,
+		YooKassaSecret:      yooSecret,
+		YooKassaReturnURL:   yooReturnURL,
+		FrontendURL:         frontendURL,
 	}
 }
 

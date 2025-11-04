@@ -75,7 +75,7 @@ func main() {
 	}
 
 	// Initialize handlers
-	userHandler := handlers.NewUserHandler(authService, paymentService, xrayService, trafficService) // Pass TrafficService
+	userHandler := handlers.NewUserHandler(authService, paymentService, xrayService, trafficService, cfg.TelegramBotUsername) // Pass TrafficService and bot username
 	adminHandler := handlers.NewAdminHandler(userRepo)
 	xrayHandler := handlers.NewXrayHandler(xrayService)
 	trafficHandler := handlers.NewTrafficHandler(trafficService) // Initialize TrafficHandler
@@ -91,6 +91,9 @@ func main() {
 	// Public routes
 	r.HandleFunc("/register", userHandler.Register).Methods("POST")
 	r.HandleFunc("/login", userHandler.Login).Methods("POST")
+	// Public password reset endpoints (allow unauthenticated requests)
+	r.HandleFunc("/user/request-password-reset", userHandler.RequestPasswordReset).Methods("POST")
+	r.HandleFunc("/reset-password", userHandler.ResetPassword).Methods("POST")
 	// Refresh access token using refresh token
 	r.HandleFunc("/refresh", userHandler.RefreshToken).Methods("POST")
 	// Webhook от ЮKassa (публичный)
@@ -109,15 +112,19 @@ func main() {
 	userRouter.Use(middleware.AuthMiddleware(cfg.JWTSecret))
 	userRouter.HandleFunc("/me", userHandler.GetMe).Methods("GET")
 	userRouter.HandleFunc("/change-tariff", userHandler.ChangeTariff).Methods("POST")
-	userRouter.HandleFunc("/traffic", trafficHandler.GetTraffic).Methods("GET")                        // Add traffic route
-	userRouter.HandleFunc("/delete-account", userHandler.DeleteAccount).Methods("POST")                // Add delete account route
-	userRouter.HandleFunc("/request-password-reset", userHandler.RequestPasswordReset).Methods("POST") // Add request password reset route
+	userRouter.HandleFunc("/traffic", trafficHandler.GetTraffic).Methods("GET")         // Add traffic route
+	userRouter.HandleFunc("/delete-account", userHandler.DeleteAccount).Methods("POST") // Add delete account route
+	// NOTE: password reset endpoints are public and already registered above.
+	// Do NOT re-register `/user/request-password-reset` on the authenticated subrouter
+	// to avoid accidentally protecting the public endpoint with AuthMiddleware.
 	userRouter.HandleFunc("/payments", paymentHandler.CreatePayment).Methods("POST")
 	userRouter.HandleFunc("/payments", paymentHandler.GetUserPayments).Methods("GET")
 	userRouter.HandleFunc("/payments/{id}", paymentHandler.GetPaymentByID).Methods("GET")
 	userRouter.HandleFunc("/payments/{id}", paymentHandler.UpdatePaymentStatus).Methods("PUT")
 	userRouter.HandleFunc("/subscription", userHandler.GetSubscription).Methods("GET")
 	userRouter.HandleFunc("/hiddify-config", userHandler.GetHiddifyConfig).Methods("GET")
+	// Telegram bot deep link for automatic recognition in the bot (returns JSON {link: string})
+	userRouter.HandleFunc("/bot-link", userHandler.GetBotLink).Methods("GET")
 	// Logout - invalidate refresh token on server
 	userRouter.HandleFunc("/logout", userHandler.Logout).Methods("POST")
 	// Создание платежа ЮKassa (аутентифицированный)
@@ -154,6 +161,21 @@ func main() {
 	}
 
 	// Start server
+	// Initialize and start Telegram bot if token is provided
+	if cfg.TelegramBotToken != "" {
+		if err := services.InitBot(cfg.TelegramBotToken, userRepo, authService, paymentService, tariffRepo, cfg); err != nil {
+			log.Printf("Failed to initialize Telegram bot: %v", err)
+		} else {
+			go func() {
+				if err := services.StartBot(); err != nil {
+					log.Printf("Telegram bot stopped: %v", err)
+				}
+			}()
+		}
+	} else {
+		log.Printf("Telegram bot token not configured; bot won't be started")
+	}
+
 	log.Printf("Server listening on port %s", cfg.ServerPort)
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("Failed to start server: %v", err)

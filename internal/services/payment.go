@@ -109,12 +109,9 @@ func (p *PaymentService) CheckTariffLimit(userID int, traffic int64) (bool, erro
 		return false, fmt.Errorf("user not found: %w", err)
 	}
 
-	tariff, err := p.TariffRepo.FindByID(user.TariffID)
-	if err != nil {
-		return false, fmt.Errorf("tariff not found: %w", err)
-	}
-
-	return traffic <= tariff.TrafficLimit, nil
+	// Access decision is based on subscription expiry/trial only (date-based).
+	// We no longer enforce traffic-based cutoffs here — return whether user currently has access.
+	return p.HasAccess(user), nil
 }
 
 func (p *PaymentService) CheckTariffLimits(userID int) (bool, error) {
@@ -123,13 +120,8 @@ func (p *PaymentService) CheckTariffLimits(userID int) (bool, error) {
 		return false, fmt.Errorf("user not found: %w", err)
 	}
 
-	tariff, err := p.TariffRepo.FindByID(user.TariffID)
-	if err != nil {
-		return false, fmt.Errorf("tariff not found: %w", err)
-	}
-
-	// Предположим, что сравниваем used_traffic и traffic_limit
-	return user.UsedTraffic <= tariff.TrafficLimit, nil
+	// For now, treat access as date-based: if user has an active trial or tariff by date, return true.
+	return p.HasAccess(user), nil
 }
 
 func (p *PaymentService) CreatePayment(userID int, amount int, tariffID int, paymentMethod string) error {

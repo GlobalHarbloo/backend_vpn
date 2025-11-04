@@ -16,6 +16,7 @@ class _ProfilePageState extends State<ProfilePage> {
   Map<String, dynamic>? _profile;
   bool _loading = false;
   String? _error;
+  bool _refreshCooldown = false;
 
   String _fmtDate(dynamic value) {
     if (value == null || (value is String && value.isEmpty)) return '-';
@@ -79,7 +80,20 @@ class _ProfilePageState extends State<ProfilePage> {
         title: const Text('Профиль'),
         actions: [
           IconButton(
-            onPressed: _loading ? null : _loadProfile,
+            onPressed: (_loading || _refreshCooldown)
+                ? null
+                : () async {
+                    // prevent hammering the server: short cooldown
+                    setState(() {
+                      _refreshCooldown = true;
+                    });
+                    try {
+                      await _loadProfile();
+                    } finally {
+                      await Future.delayed(const Duration(seconds: 2));
+                      if (mounted) setState(() => _refreshCooldown = false);
+                    }
+                  },
             icon: const Icon(Icons.refresh),
             tooltip: 'Обновить',
           ),
@@ -96,6 +110,49 @@ class _ProfilePageState extends State<ProfilePage> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
+                    // Баннер: если триал закончился и доступа нет — показываем ссылку на Telegram бота
+                    if (!hasAccess && _profile?['trial_ends_at'] != null) ...[
+                      Card(
+                        color: Colors.yellow[100],
+                        child: Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Expanded(
+                                child: Text(
+                                  'Триал закончился — оплатите подписку через нашего Telegram-бота.',
+                                ),
+                              ),
+                              ElevatedButton(
+                                onPressed: () async {
+                                  try {
+                                    final link = await AuthService.getBotLink();
+                                    if (link.isNotEmpty) {
+                                      await launchUrl(Uri.parse(link));
+                                    }
+                                  } catch (e) {
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Ошибка: ${e.toString()}',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  }
+                                },
+                                child: const Text('Оплатить'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     // Telegram support link
                     Padding(
                       padding: const EdgeInsets.only(bottom: 16.0),
@@ -230,6 +287,82 @@ class _ProfilePageState extends State<ProfilePage> {
                               ).pushNamed('/change-password');
                             },
                             label: const Text('Сменить пароль'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.email),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            onPressed: () async {
+                              final emailController = TextEditingController(
+                                text: _profile?['email'] ?? '',
+                              );
+                              final result = await showDialog<String>(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('Сброс пароля'),
+                                  content: TextField(
+                                    controller: emailController,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Email',
+                                    ),
+                                    keyboardType: TextInputType.emailAddress,
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx),
+                                      child: const Text('Отмена'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(
+                                        ctx,
+                                        emailController.text,
+                                      ),
+                                      child: const Text('Отправить'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (result != null && result.isNotEmpty) {
+                                String? error;
+                                String? success;
+                                try {
+                                  await AuthService.requestPasswordReset(
+                                    result,
+                                  );
+                                  success =
+                                      'Письмо для сброса пароля отправлено (если email зарегистрирован)';
+                                  if (context.mounted)
+                                    Navigator.of(
+                                      context,
+                                    ).pushNamed('/reset-password');
+                                } catch (e) {
+                                  error = e.toString().replaceAll(
+                                    'Exception: ',
+                                    '',
+                                  );
+                                }
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(error ?? success ?? ''),
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                            label: const Text('Сброс по коду'),
                           ),
                         ),
                       ],

@@ -47,14 +47,16 @@ class _LoginPageState extends State<LoginPage> {
                 TextFormField(
                   controller: _emailController,
                   decoration: const InputDecoration(labelText: 'Email'),
-                  validator: (v) => v == null || v.isEmpty ? 'Введите email' : null,
+                  validator: (v) =>
+                      v == null || v.isEmpty ? 'Введите email' : null,
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _passwordController,
                   decoration: const InputDecoration(labelText: 'Пароль'),
                   obscureText: true,
-                  validator: (v) => v == null || v.isEmpty ? 'Введите пароль' : null,
+                  validator: (v) =>
+                      v == null || v.isEmpty ? 'Введите пароль' : null,
                 ),
                 const SizedBox(height: 24),
                 if (_error != null)
@@ -76,7 +78,9 @@ class _LoginPageState extends State<LoginPage> {
                 TextButton(
                   onPressed: _loading
                       ? null
-                      : () => Navigator.of(context).pushReplacementNamed('/register'),
+                      : () => Navigator.of(
+                          context,
+                        ).pushReplacementNamed('/register'),
                   child: const Text('Нет аккаунта? Зарегистрироваться'),
                 ),
                 TextButton(
@@ -90,12 +94,21 @@ class _LoginPageState extends State<LoginPage> {
                               title: const Text('Сброс пароля'),
                               content: TextField(
                                 controller: emailController,
-                                decoration: const InputDecoration(labelText: 'Email'),
+                                decoration: const InputDecoration(
+                                  labelText: 'Email',
+                                ),
                                 keyboardType: TextInputType.emailAddress,
                               ),
                               actions: [
-                                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
-                                TextButton(onPressed: () => Navigator.pop(ctx, emailController.text), child: const Text('Сбросить')),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx),
+                                  child: const Text('Отмена'),
+                                ),
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(ctx, emailController.text),
+                                  child: const Text('Сбросить'),
+                                ),
                               ],
                             ),
                           );
@@ -104,9 +117,19 @@ class _LoginPageState extends State<LoginPage> {
                             String? success;
                             try {
                               await AuthService.requestPasswordReset(result);
-                              success = 'Письмо для сброса пароля отправлено (если email зарегистрирован)';
+                              success =
+                                  'Письмо для сброса пароля отправлено (если email зарегистрирован)';
+                              // Перейдём на страницу ввода кода и нового пароля
+                              if (context.mounted) {
+                                Navigator.of(
+                                  context,
+                                ).pushNamed('/reset-password');
+                              }
                             } catch (e) {
-                              error = e.toString().replaceAll('Exception: ', '');
+                              error = e.toString().replaceAll(
+                                'Exception: ',
+                                '',
+                              );
                             }
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -124,4 +147,4 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
-} 
+}

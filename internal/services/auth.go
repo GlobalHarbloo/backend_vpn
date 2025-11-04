@@ -86,6 +86,24 @@ func (a *AuthService) GenerateJWT(userID int) (string, error) {
 	return tokenString, nil
 }
 
+// GenerateBotToken creates a short-lived JWT intended for Telegram bot deep links.
+// The token contains the user_id and expires after the provided ttl.
+func (a *AuthService) GenerateBotToken(userID int, ttl time.Duration) (string, error) {
+	expirationTime := time.Now().Add(ttl)
+	claims := &jwt.MapClaims{
+		"user_id": userID,
+		"exp":     expirationTime.Unix(),
+		"type":    "bot",
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(a.jwtSecret))
+	if err != nil {
+		return "", fmt.Errorf("failed to sign bot token: %w", err)
+	}
+	return tokenString, nil
+}
+
 // CreateTokens generates an access JWT and a refresh token, stores the hashed refresh token in DB.
 func (a *AuthService) CreateTokens(userID int) (accessToken string, refreshToken string, err error) {
 	accessToken, err = a.GenerateJWT(userID)
@@ -144,4 +162,28 @@ func (a *AuthService) AuthenticateByTelegramID(telegramID int64) (string, string
 		return "", "", fmt.Errorf("failed to create tokens: %w", err)
 	}
 	return access, refresh, nil
+}
+
+// ValidateBotToken parses a bot JWT token and ensures it's a bot-type token.
+func (a *AuthService) ValidateBotToken(tokenString string) (int, error) {
+	claims := jwt.MapClaims{}
+	token, err := jwt.ParseWithClaims(tokenString, &claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(a.jwtSecret), nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse token: %w", err)
+	}
+	if !token.Valid {
+		return 0, fmt.Errorf("invalid token")
+	}
+	// ensure token type is bot
+	t, ok := claims["type"].(string)
+	if !ok || t != "bot" {
+		return 0, fmt.Errorf("not a bot token")
+	}
+	userIDFloat, ok := claims["user_id"].(float64)
+	if !ok {
+		return 0, fmt.Errorf("invalid user id in token")
+	}
+	return int(userIDFloat), nil
 }

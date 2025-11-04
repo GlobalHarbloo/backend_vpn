@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+
 	"github.com/yourusername/vpn-backend/config"
 	"github.com/yourusername/vpn-backend/internal/handlers"
 	"github.com/yourusername/vpn-backend/internal/middleware"
@@ -72,7 +73,7 @@ func setup() {
 	paymentService.AttachXrayService(xrayService)
 
 	// Initialize handlers
-	userHandler = handlers.NewUserHandler(authService, paymentService, xrayService, trafficService)
+	userHandler = handlers.NewUserHandler(authService, paymentService, xrayService, trafficService, cfg.TelegramBotUsername)
 	adminHandler = handlers.NewAdminHandler(userRepo)
 	xrayHandler = handlers.NewXrayHandler(xrayService)
 	trafficHandler = handlers.NewTrafficHandler(trafficService)

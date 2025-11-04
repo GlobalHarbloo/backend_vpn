@@ -8,6 +8,7 @@ import (
 
 	"github.com/yourusername/vpn-backend/internal/models"
 
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -193,6 +194,22 @@ func (r *UserRepository) UpdatePaymentProviderID(userID int, paymentID string, p
 	}
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("payment not found")
+	}
+	return nil
+}
+
+// UpdatePasswordByEmail hashes and updates the password for the user with given email.
+func (r *UserRepository) UpdatePasswordByEmail(email, newPassword string) error {
+	hashed, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+	result := r.DB.Model(&models.User{}).Where("email = ?", email).Update("password", string(hashed))
+	if result.Error != nil {
+		return fmt.Errorf("failed to update password: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("user not found")
 	}
 	return nil
 }

@@ -22,3 +22,6 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	golang.org/x/text v0.14.0 // indirect
 )
+
+// Telegram bot for payment/login flow
+require /github.com/go-telegram-bot-api/telegram-bot-api/releases/tag/v5 v5.5.1

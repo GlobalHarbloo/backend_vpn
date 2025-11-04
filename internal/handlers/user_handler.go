@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -21,18 +22,20 @@ import (
 )
 
 type UserHandler struct {
-	Auth    *services.AuthService
-	Payment *services.PaymentService
-	Xray    *services.XrayService
-	Traffic *services.TrafficService
+	Auth        *services.AuthService
+	Payment     *services.PaymentService
+	Xray        *services.XrayService
+	Traffic     *services.TrafficService
+	BotUsername string
 }
 
-func NewUserHandler(auth *services.AuthService, payment *services.PaymentService, xray *services.XrayService, traffic *services.TrafficService) *UserHandler {
+func NewUserHandler(auth *services.AuthService, payment *services.PaymentService, xray *services.XrayService, traffic *services.TrafficService, botUsername string) *UserHandler {
 	return &UserHandler{
-		Auth:    auth,
-		Payment: payment,
-		Xray:    xray,
-		Traffic: traffic,
+		Auth:        auth,
+		Payment:     payment,
+		Xray:        xray,
+		Traffic:     traffic,
+		BotUsername: botUsername,
 	}
 }
 
@@ -257,17 +260,32 @@ func (h *UserHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Сначала удаляем из Xray конфига
+	// Attempt to remove user from Xray config and restart Xray before deleting from DB.
+	// This ensures the running Xray instance is consistent. If restart fails,
+	// we attempt to restore the previous config and abort deletion.
 	if err := h.Xray.RemoveUserFromConfig(user.UUID); err != nil {
 		log.Printf("[Xray] Error removing user from config: %v", err)
 		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to update Xray config")
 		return
 	}
 
-	// Перезапуск Xray после удаления пользователя
-	h.Xray.ScheduleRestart()
+	// Try to restart Xray synchronously and ensure it came up.
+	if err := h.Xray.RestartXray(); err != nil {
+		log.Printf("[Xray] Restart failed after removing user %s: %v", user.UUID, err)
+		// Try to rollback config from backup
+		if rbErr := h.Xray.RestoreBackup(); rbErr != nil {
+			log.Printf("[Xray] Failed to restore backup after restart failure: %v", rbErr)
+		} else {
+			// attempt to restart back to the previous config
+			if rrErr := h.Xray.RestartXray(); rrErr != nil {
+				log.Printf("[Xray] Restart after restoring backup also failed: %v", rrErr)
+			}
+		}
+		utils.RespondWithError(w, http.StatusInternalServerError, "Xray restart failed after config update; aborting deletion")
+		return
+	}
 
-	// Удаляем пользователя из базы данных
+	// Now safe to delete user from DB
 	if err := h.Auth.UserRepo.Delete(userID); err != nil {
 		log.Printf("[DB] Error deleting user: %v", err)
 		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to delete user")
@@ -398,6 +416,30 @@ func (h *UserHandler) GetSubscription(w http.ResponseWriter, r *http.Request) {
 	)
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write([]byte(sub))
+}
+
+// GetBotLink returns a Telegram deep link that contains a short-lived token for automatic user recognition in the bot.
+func (h *UserHandler) GetBotLink(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r)
+	if !ok {
+		utils.RespondWithError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	if h.BotUsername == "" {
+		utils.RespondWithError(w, http.StatusBadRequest, "Telegram bot not configured on server")
+		return
+	}
+
+	// Create a short-lived token (15 minutes)
+	token, err := h.Auth.GenerateBotToken(userID, 15*time.Minute)
+	if err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to create bot token")
+		return
+	}
+
+	link := fmt.Sprintf("https://t.me/%s?start=%s", h.BotUsername, url.QueryEscape(token))
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"link": link})
 }
 
 func (h *UserHandler) GetHiddifyConfig(w http.ResponseWriter, r *http.Request) {

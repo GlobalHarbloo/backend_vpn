@@ -113,10 +113,30 @@ func (s *XrayService) saveConfig(config map[string]interface{}) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(s.ConfigPath, configBytes, 0644); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
+	// Write atomically: write to temp file then replace original, keeping a .bak copy.
+	tmpPath := s.ConfigPath + ".tmp"
+	bakPath := s.ConfigPath + ".bak"
+
+	if err := os.WriteFile(tmpPath, configBytes, 0644); err != nil {
+		return fmt.Errorf("failed to write temp config file: %w", err)
 	}
 
+	// Backup existing config (if exists)
+	if err := os.Rename(s.ConfigPath, bakPath); err != nil && !os.IsNotExist(err) {
+		// if rename failed and it's not because file doesn't exist, clean up tmp and return
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to backup existing config: %w", err)
+	}
+
+	// Move tmp into place
+	if err := os.Rename(tmpPath, s.ConfigPath); err != nil {
+		// try to restore backup
+		_ = os.Rename(bakPath, s.ConfigPath)
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to replace config file: %w", err)
+	}
+
+	// Optionally remove backup if everything is OK (keep for safety)
 	return nil
 }
 
@@ -216,19 +236,19 @@ func (s *XrayService) AddUserToConfig(user *models.User) error {
 func (s *XrayService) RemoveUserFromConfig(userUUID string) error {
 	config, err := s.loadConfig()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load xray config: %w", err)
 	}
 
 	targetInbound, err := s.findInboundWithClients(config)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to find inbound with clients: %w", err)
 	}
 
 	settingsI, _ := targetInbound["settings"]
 	settings, _ := settingsI.(map[string]interface{})
 	clientsI, _ := settings["clients"].([]interface{})
 
-	newClients := []interface{}{}
+	newClients := make([]interface{}, 0, len(clientsI))
 	for _, client := range clientsI {
 		if cm, ok := client.(map[string]interface{}); ok {
 			if cm["id"] != userUUID {
@@ -238,7 +258,12 @@ func (s *XrayService) RemoveUserFromConfig(userUUID string) error {
 	}
 	settings["clients"] = newClients
 
-	return s.saveConfig(config)
+	// Save config atomically with backup to avoid corrupting the file.
+	if err := s.saveConfig(config); err != nil {
+		return fmt.Errorf("failed to save xray config after removing user: %w", err)
+	}
+
+	return nil
 }
 
 func (s *XrayService) UpdateUserTariff(userUUID string, level int) error {
@@ -288,6 +313,29 @@ func (s *XrayService) ScheduleRestart() {
 			log.Printf("Error restarting Xray: %v", err)
 		}
 	}()
+}
+
+// RestoreBackup attempts to restore the .bak config as the active config.
+// This is useful when a new config was written but Xray failed to restart
+// so we can attempt to rollback to the previous known-good configuration.
+func (s *XrayService) RestoreBackup() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	bakPath := s.ConfigPath + ".bak"
+	if _, err := os.Stat(bakPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("backup not found: %s", bakPath)
+		}
+		return fmt.Errorf("failed to stat backup: %w", err)
+	}
+
+	// Replace current config with backup
+	if err := os.Rename(bakPath, s.ConfigPath); err != nil {
+		return fmt.Errorf("failed to restore backup: %w", err)
+	}
+	log.Printf("Xray config restored from backup: %s", bakPath)
+	return nil
 }
 
 func (s *XrayService) GenerateUserConfig(user *models.User) ([]byte, error) {
