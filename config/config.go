@@ -17,6 +17,10 @@ type Config struct {
 	YooKassaShopID      string
 	YooKassaSecret      string
 	YooKassaReturnURL   string
+	RobokassaLogin      string
+	RobokassaPassword1  string
+	RobokassaPassword2  string
+	DefaultLang         string
 	FrontendURL         string
 	AdminChatIDs        string // comma-separated telegram chat IDs for admin notifications
 	PublicOfferURL      string // URL to the public offer/terms
@@ -32,7 +36,11 @@ func Load() *Config {
 	yooShopID := getEnv("YOOKASSA_SHOP_ID", "")
 	yooSecret := getEnv("YOOKASSA_SECRET", "")
 	yooReturnURL := getEnv("YOOKASSA_RETURN_URL", "")
+	robokassaLogin := getEnv("ROBOKASSA_LOGIN", "")
+	robokassaP1 := getEnv("ROBOKASSA_PASSWORD1", "")
+	robokassaP2 := getEnv("ROBOKASSA_PASSWORD2", "")
 	frontendURL := getEnv("FRONTEND_URL", "https://your-frontend.com")
+	defaultLang := getEnv("DEFAULT_LANG", "ru")
 	telegramBot := getEnv("TELEGRAM_BOT_USERNAME", "")
 	telegramToken := getEnv("TELEGRAM_BOT_TOKEN", "")
 	adminChatIDs := getEnv("ADMIN_CHAT_IDS", "")
@@ -50,6 +58,10 @@ func Load() *Config {
 		YooKassaShopID:      yooShopID,
 		YooKassaSecret:      yooSecret,
 		YooKassaReturnURL:   yooReturnURL,
+		RobokassaLogin:      robokassaLogin,
+		RobokassaPassword1:  robokassaP1,
+		RobokassaPassword2:  robokassaP2,
+		DefaultLang:         defaultLang,
 		FrontendURL:         frontendURL,
 		AdminChatIDs:        adminChatIDs,
 		PublicOfferURL:      publicOffer,

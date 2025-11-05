@@ -168,6 +168,16 @@ func (r *UserRepository) GetPaymentByID(userID int, paymentID string) (*models.P
 	return &payment, nil
 }
 
+// GetPaymentByIDAny returns a payment record by its ID without requiring the user_id.
+func (r *UserRepository) GetPaymentByIDAny(paymentID string) (*models.Payment, error) {
+	var payment models.Payment
+	result := r.DB.Where("id = ?", paymentID).First(&payment)
+	if result.Error != nil {
+		return nil, fmt.Errorf("payment not found: %w", result.Error)
+	}
+	return &payment, nil
+}
+
 func (r *UserRepository) CreatePayment(payment *models.Payment) error {
 	result := r.DB.Create(payment)
 	if result.Error != nil {
@@ -287,6 +297,44 @@ func (r *UserRepository) FindByRefreshToken(token string) (*models.User, error) 
 		return nil, err
 	}
 	return &user, nil
+}
+
+// Bot session helpers
+func (r *UserRepository) GetBotSession(chatID int64) (*models.BotSession, error) {
+	var s models.BotSession
+	result := r.DB.Where("chat_id = ?", chatID).First(&s)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &s, nil
+}
+
+func (r *UserRepository) SaveBotSession(chatID int64, action string, step int, email string) error {
+	now := time.Now()
+	s := models.BotSession{
+		ChatID:    chatID,
+		Action:    action,
+		Step:      step,
+		Email:     email,
+		UpdatedAt: now,
+	}
+	// Upsert
+	// Try update first
+	result := r.DB.Model(&models.BotSession{}).Where("chat_id = ?", chatID).Updates(map[string]interface{}{"action": action, "step": step, "email": email, "updated_at": now})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		if err := r.DB.Create(&s).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *UserRepository) DeleteBotSession(chatID int64) error {
+	result := r.DB.Where("chat_id = ?", chatID).Delete(&models.BotSession{})
+	return result.Error
 }
 
 func (r *UserRepository) FindByPasswordResetToken(token string) (*models.User, error) {

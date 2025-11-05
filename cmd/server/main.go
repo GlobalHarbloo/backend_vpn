@@ -33,7 +33,7 @@ func main() {
 	}
 
 	// Auto-migrate database schema
-	err = dbConn.AutoMigrate(&models.User{}, &models.Tariff{}, &models.Payment{})
+	err = dbConn.AutoMigrate(&models.User{}, &models.Tariff{}, &models.Payment{}, &models.BotSession{})
 	if err != nil {
 		log.Fatalf("Failed to auto-migrate database: %v", err)
 	}
@@ -98,6 +98,11 @@ func main() {
 	r.HandleFunc("/refresh", userHandler.RefreshToken).Methods("POST")
 	// Webhook от ЮKassa (публичный)
 	r.HandleFunc("/payments/webhook", paymentHandler.YooKassaWebhookHandler()).Methods("POST")
+	// Robokassa callback (public)
+	r.HandleFunc("/payments/robokassa/callback", paymentHandler.RobokassaWebhookHandler(cfg.RobokassaPassword2)).Methods("POST", "GET")
+
+	// Endpoint for bot to link telegram_id by uuid (public, bot posts {action: 'link', uuid, telegram_id})
+	r.HandleFunc("/bot/link", userHandler.BotLinkHandler).Methods("POST")
 
 	// Путь к файлу подписки
 	subscriptionFilePath := "subscription.txt" // или относительный путь, если сервер запускается из этой папки
@@ -129,6 +134,8 @@ func main() {
 	userRouter.HandleFunc("/logout", userHandler.Logout).Methods("POST")
 	// Создание платежа ЮKassa (аутентифицированный)
 	userRouter.HandleFunc("/payments/yookassa", paymentHandler.CreateYooKassaPaymentHandler(cfg.YooKassaReturnURL, cfg.YooKassaShopID, cfg.YooKassaSecret)).Methods("POST")
+	// Создание платежа Robokassa (аутентифицированный)
+	userRouter.HandleFunc("/payments/robokassa", paymentHandler.CreateRobokassaPaymentHandler(cfg.RobokassaLogin, cfg.RobokassaPassword1, cfg.FrontendURL)).Methods("POST")
 
 	// Xray config route
 	userRouter.HandleFunc("/config", handlers.NewConfigHandler(xrayService).GetConfig).Methods("GET")

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -134,6 +135,52 @@ func (h *PaymentHandler) CreateYooKassaPaymentHandler(cfgReturnURL, cfgShopID, c
 			return
 		}
 		utils.RespondWithJSON(w, http.StatusCreated, map[string]string{"confirmation_url": url, "provider_id": providerID})
+	}
+}
+
+// CreateRobokassaPaymentHandler создаёт платёж в Robokassa и возвращает ссылку для оплаты.
+func (h *PaymentHandler) CreateRobokassaPaymentHandler(robokassaLogin, password1, baseReturnURL string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := middleware.GetUserID(r)
+		if !ok {
+			utils.RespondWithError(w, http.StatusUnauthorized, "Unauthorized")
+			return
+		}
+		var data struct {
+			Months int `json:"months"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&data); err != nil || (data.Months != 1 && data.Months != 3) {
+			utils.RespondWithError(w, http.StatusBadRequest, "Invalid months")
+			return
+		}
+		amount := 299
+		if data.Months == 3 {
+			amount = 749
+		}
+		url, invId, successURL, failURL, err := h.PaymentService.CreateRobokassaPayment(userID, data.Months, amount, "VPN subscription", robokassaLogin, password1, baseReturnURL)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, "Failed to create robokassa payment")
+			return
+		}
+		utils.RespondWithJSON(w, http.StatusCreated, map[string]string{"confirmation_url": url, "inv_id": invId, "success_url": successURL, "fail_url": failURL})
+	}
+}
+
+// RobokassaWebhookHandler принимает уведомления от Robokassa (server-to-server)
+func (h *PaymentHandler) RobokassaWebhookHandler(password2 string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Robokassa may send either POST form or GET query. Parse both.
+		if err := r.ParseForm(); err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, "Invalid form")
+			return
+		}
+		if err := h.PaymentService.HandleRobokassaCallback(r.Form, password2); err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("Robokassa callback error: %v", err))
+			return
+		}
+		// Robokassa expects plain OK response
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
 	}
 }
 

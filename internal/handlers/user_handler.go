@@ -628,3 +628,31 @@ func (h *UserHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
 }
+
+// BotLinkHandler принимает POST от бота вида {"action":"link","uuid":"UUID123","telegram_id":"123456789"}
+// и привязывает telegram_id к пользователю с указанным uuid.
+func (h *UserHandler) BotLinkHandler(w http.ResponseWriter, r *http.Request) {
+	var data struct {
+		Action     string `json:"action"`
+		UUID       string `json:"uuid"`
+		TelegramID int64  `json:"telegram_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		utils.RespondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if data.Action != "link" || data.UUID == "" || data.TelegramID == 0 {
+		utils.RespondWithError(w, http.StatusBadRequest, "Missing fields or invalid action")
+		return
+	}
+	user, err := h.Auth.UserRepo.GetUserByUUID(data.UUID)
+	if err != nil {
+		utils.RespondWithError(w, http.StatusNotFound, "User not found")
+		return
+	}
+	if err := h.Auth.UserRepo.UpdateUserTelegramID(int(user.ID), data.TelegramID); err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to link telegram id")
+		return
+	}
+	utils.RespondWithJSON(w, http.StatusOK, map[string]string{"status": "linked"})
+}

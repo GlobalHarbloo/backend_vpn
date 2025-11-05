@@ -2,10 +2,14 @@ package services
 
 import (
 	"bytes"
+	"crypto/md5"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/yourusername/vpn-backend/internal/models"
@@ -240,6 +244,110 @@ func (p *PaymentService) CreateYooKassaPayment(userID int, months int, returnURL
 	_ = p.UserRepo.UpdatePaymentProviderID(payment.UserID, fmt.Sprint(payment.ID), yres.ID)
 
 	return yres.Confirmation.URL, yres.ID, nil
+}
+
+// CreateRobokassaPayment создает запись о платеже и формирует ссылку для оплаты через Robokassa.
+// robokassaLogin — логин мерчанта, password1 — пароль для формирования подписи на редирект,
+// password2 — пароль для проверки уведомлений (POST).
+func (p *PaymentService) CreateRobokassaPayment(userID int, months int, amountRub int, description string, robokassaLogin, password1 string, baseReturnURL string) (string, string, string, string, error) {
+	// Создать запись платежа (pending)
+	payment := &models.Payment{
+		UserID:        userID,
+		Amount:        amountRub,
+		TariffID:      months, // store months temporarily
+		PaymentMethod: "robokassa",
+		Status:        "pending",
+		Provider:      "robokassa",
+		CreatedAt:     time.Now(),
+	}
+	if err := p.UserRepo.CreatePayment(payment); err != nil {
+		return "", "", "", "", fmt.Errorf("failed to create payment record: %w", err)
+	}
+
+	// Use payment.ID as InvId
+	invID := fmt.Sprintf("%d", payment.ID)
+	outSum := fmt.Sprintf("%d", amountRub)
+
+	// Signature: md5(MrchLogin:OutSum:InvId:Password1)
+	signSrc := fmt.Sprintf("%s:%s:%s:%s", robokassaLogin, outSum, invID, password1)
+	md := md5.Sum([]byte(signSrc))
+	signature := hex.EncodeToString(md[:])
+
+	// Build payment URL (classic robokassa redirect)
+	// Example: https://auth.robokassa.ru/Merchant/Index.aspx?MrchLogin=login&OutSum=100&InvId=1&Desc=desc&SignatureValue=sign
+	payURL := fmt.Sprintf("https://auth.robokassa.ru/Merchant/Index.aspx?MrchLogin=%s&OutSum=%s&InvId=%s&Desc=%s&SignatureValue=%s",
+		urlQueryEscape(robokassaLogin), urlQueryEscape(outSum), urlQueryEscape(invID), urlQueryEscape(description), urlQueryEscape(signature))
+
+	// Build simple success/fail URLs for merchant return (frontend or server)
+	successURL := ""
+	failURL := ""
+	if baseReturnURL != "" {
+		base := strings.TrimRight(baseReturnURL, "/")
+		successURL = fmt.Sprintf("%s/payments/robokassa/success?inv=%s", base, invID)
+		failURL = fmt.Sprintf("%s/payments/robokassa/fail?inv=%s", base, invID)
+	}
+
+	return payURL, invID, successURL, failURL, nil
+}
+
+// HandleRobokassaCallback processes server-to-server notifications from Robokassa.
+// It validates signature and, if payment is valid, marks it paid and extends subscription.
+func (p *PaymentService) HandleRobokassaCallback(form map[string][]string, password2 string) error {
+	// Robokassa typically sends OutSum, InvId and SignatureValue (case-insensitive)
+	outSum := firstFormVal(form, "OutSum")
+	invId := firstFormVal(form, "InvId")
+	signature := firstFormVal(form, "SignatureValue")
+	if outSum == "" || invId == "" || signature == "" {
+		return fmt.Errorf("missing required robokassa fields")
+	}
+
+	// signature check: md5(OutSum:InvId:Password2)
+	signSrc := fmt.Sprintf("%s:%s:%s", outSum, invId, password2)
+	md := md5.Sum([]byte(signSrc))
+	expected := strings.ToLower(hex.EncodeToString(md[:]))
+	if strings.ToLower(signature) != expected {
+		return fmt.Errorf("invalid signature")
+	}
+
+	// Find payment by invId
+	payment, err := p.UserRepo.GetPaymentByIDAny(invId)
+	if err != nil {
+		return fmt.Errorf("payment not found: %w", err)
+	}
+
+	// Mark payment as paid
+	if err := p.UserRepo.UpdatePaymentStatus(payment.UserID, invId, "paid"); err != nil {
+		// try to continue even if updating status fails
+		return fmt.Errorf("failed to update payment status: %w", err)
+	}
+
+	// Determine months from TariffID field stored earlier
+	months := payment.TariffID
+	amount := payment.Amount
+
+	// Extend subscription
+	if err := p.OnYooKassaWebhookSucceeded(payment.UserID, months, invId, amount); err != nil {
+		return fmt.Errorf("failed to apply subscription: %w", err)
+	}
+
+	return nil
+}
+
+// helpers
+func firstFormVal(form map[string][]string, key string) string {
+	if v, ok := form[key]; ok && len(v) > 0 {
+		return v[0]
+	}
+	// try lowercase
+	if v, ok := form[strings.ToLower(key)]; ok && len(v) > 0 {
+		return v[0]
+	}
+	return ""
+}
+
+// urlQueryEscape is a tiny helper to escape query values
+func urlQueryEscape(s string) string {
+	return url.QueryEscape(s)
 }
 
 // OnYooKassaWebhookSucceeded обновляет подписку пользователя на указанный период
