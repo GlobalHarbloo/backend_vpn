@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -315,9 +316,25 @@ func (p *PaymentService) HandleRobokassaCallback(form map[string][]string, passw
 		return fmt.Errorf("payment not found: %w", err)
 	}
 
+	// Parse OutSum (Robokassa may send decimals like 100.00). Compare with stored integer amount (RUB whole units).
+	// We accept small formatting differences but require the integer rubles to match.
+	outSumF, perr := strconv.ParseFloat(outSum, 64)
+	if perr != nil {
+		return fmt.Errorf("invalid OutSum value: %w", perr)
+	}
+	// Convert to int rubles by rounding to nearest integer (robokassa usually sends .00)
+	outSumInt := int(outSumF + 0.5)
+	if outSumInt != payment.Amount {
+		return fmt.Errorf("amount mismatch: notification %d vs payment record %d", outSumInt, payment.Amount)
+	}
+
+	// Idempotency: if already paid, treat as success
+	if strings.ToLower(payment.Status) == "paid" {
+		return nil
+	}
+
 	// Mark payment as paid
 	if err := p.UserRepo.UpdatePaymentStatus(payment.UserID, invId, "paid"); err != nil {
-		// try to continue even if updating status fails
 		return fmt.Errorf("failed to update payment status: %w", err)
 	}
 

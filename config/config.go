@@ -36,10 +36,17 @@ func Load() *Config {
 	yooShopID := getEnv("YOOKASSA_SHOP_ID", "")
 	yooSecret := getEnv("YOOKASSA_SECRET", "")
 	yooReturnURL := getEnv("YOOKASSA_RETURN_URL", "")
-	robokassaLogin := getEnv("ROBOKASSA_LOGIN", "")
-	robokassaP1 := getEnv("ROBOKASSA_PASSWORD1", "")
-	robokassaP2 := getEnv("ROBOKASSA_PASSWORD2", "")
-	frontendURL := getEnv("FRONTEND_URL", "https://your-frontend.com")
+	// NOTE: Defaults below are provided per request. In production it's safer
+	// to set these via environment variables or a secrets manager rather than
+	// committing secrets to source code.
+	robokassaLogin := getEnv("ROBOKASSA_LOGIN", "freshvpn")
+	// Password #1 — used to sign redirect requests (MD5 signature)
+	robokassaP1 := getEnv("ROBOKASSA_PASSWORD1", "gdId0uf28sfAXny9G0DN")
+	// Password #2 — used to validate server-to-server notifications (Result URL)
+	robokassaP2 := getEnv("ROBOKASSA_PASSWORD2", "CP1H0EAI6PadIWl4iQ4H")
+	// Frontend / merchant return URLs. Provided value here uses the Telegram link
+	// supplied; normally this should be your frontend URL (e.g. https://example.com)
+	frontendURL := getEnv("FRONTEND_URL", "http://t.me/Fresh_v_p_n")
 	defaultLang := getEnv("DEFAULT_LANG", "ru")
 	telegramBot := getEnv("TELEGRAM_BOT_USERNAME", "")
 	telegramToken := getEnv("TELEGRAM_BOT_TOKEN", "")
